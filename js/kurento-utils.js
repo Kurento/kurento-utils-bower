@@ -13,25 +13,24 @@
  * Lesser General Public License for more details.
  */
 
-var freeice = require('freeice');
+var freeice  = require('freeice');
+var inherits = require('inherits');
 
-/**
- * @description Default handler for error callbacks. The error messaged passed
- *              as argument is showed in a console, a div layer which should be
- *              previously created.
- *
- * @function defaultOnerror
- *
- * @param error -
- *            {String} Error message
- */
-function defaultOnerror(error) {
-	if (error)
-		console.error(error);
+var EventEmitter = require('events').EventEmitter;
+
+var recursive = require('merge').recursive
+
+
+function noop(error)
+{
+  if(error) console.trace(error)
 }
 
-function noop() {
-};
+function trackStop(track)
+{
+  track.stop && track.stop()
+}
+
 
 /**
  * @classdesc Wrapper object of an RTCPeerConnection. This object is aimed to
@@ -60,197 +59,267 @@ function noop() {
  *            audio) for localVideo and to be added as stream to the
  *            RTCPeerConnection
  */
-function WebRtcPeer(mode, localVideo, remoteVideo, onsdpoffer, onerror,
-		videoStream, audioStream) {
+function WebRtcPeer(mode, options, callback)
+{
+  WebRtcPeer.super_.call(this)
 
-	Object.defineProperty(this, 'pc', {
-		writable : true
-	});
+  var localVideo, remoteVideo, onsdpoffer, onerror, mediaConstraints;
+  var videoStream, audioStream, connectionConstraints;
 
-	this.localVideo = localVideo;
-	this.remoteVideo = remoteVideo;
-	this.onerror = onerror || defaultOnerror;
-	this.stream = videoStream;
-	this.audioStream = audioStream;
-	this.mode = mode;
-	this.onsdpoffer = onsdpoffer || noop;
+  while(arguments.length && !arguments[arguments.length-1]) arguments.length--;
+
+  if(arguments.length > 2)  // Deprecated mode
+  {
+    console.warn('Positional parameters are deprecated for WebRtcPeer')
+
+    localVideo       = arguments[1];
+    remoteVideo      = arguments[2];
+    onsdpoffer       = arguments[3];
+    onerror          = arguments[4];
+    mediaConstraints = arguments[5];
+    videoStream      = arguments[6];
+    audioStream      = arguments[7];
+  }
+  else
+  {
+    localVideo       = options.localVideo;
+    remoteVideo      = options.remoteVideo;
+    onsdpoffer       = options.onsdpoffer;
+    onerror          = options.onerror;
+    mediaConstraints = options.mediaConstraints;
+    videoStream      = options.videoStream;
+    audioStream      = options.audioStream;
+
+    connectionConstraints = options.connectionConstraints;
+  }
+
+  if(onerror)    this.on('error',    onerror);
+  if(onsdpoffer) this.on('sdpoffer', onsdpoffer);
+
+
+  // Init PeerConnection
+
+  var pc = options.peerConnection
+  if(!pc)
+  {
+    var configuration = recursive(
+    {
+      iceServers : freeice()
+    },
+    WebRtcPeer.prototype.server,
+    options.configuration);
+
+    pc = new RTCPeerConnection(configuration);
+  }
+
+  Object.defineProperty(this, 'peerConnection', {get: function(){return pc;}});
+
+  var self = this;
+
+  var ended = false;
+  pc.addEventListener('icecandidate', function(event)
+  {
+    // candidate exists in event.candidate
+    if(event.candidate)
+    {
+      ended = false;
+      return;
+    }
+
+    // [Hack] On old Chrome, when there's no Internet connection onicecandidate
+    // event is being called infinitelly (bug). This prevent it.
+    if(ended) return;
+    ended = true;
+
+    self.emit('sdpoffer', pc.localDescription.sdp);
+    console.log('ICE negotiation completed');
+  });
+
+
+  //
+  // Priviledged methods
+  //
+
+  /**
+  * @description This method creates the RTCPeerConnection object taking into
+  *              account the properties received in the constructor. It starts
+  *              the SDP negotiation process: generates the SDP offer and invokes
+  *              the onsdpoffer callback. This callback is expected to send the
+  *              SDP offer, in order to obtain an SDP answer from another peer.
+  *
+  * @function module:kurentoUtils.WebRtcPeer.prototype.start
+  */
+  this.start = function(constraints, callback)
+  {
+    if(videoStream && localVideo)
+    {
+      localVideo.src = URL.createObjectURL(videoStream);
+      localVideo.muted = true;
+    }
+
+    if(videoStream) pc.addStream(videoStream);
+    if(audioStream) pc.addStream(audioStream);
+
+    // Adjust arguments
+
+    if(constraints instanceof Function)
+    {
+      if(callback) throw new Error('Nothing can be defined after the callback')
+
+      callback    = constraints
+      constraints = undefined
+    }
+
+    constraints = recursive(
+    {
+      mandatory:
+      {
+        OfferToReceiveAudio: (mode !== 'sendonly'),
+        OfferToReceiveVideo: (mode !== 'sendonly')
+      },
+      optional:
+      [
+        {DtlsSrtpKeyAgreement: true}
+      ]
+    }, constraints);
+
+    callback = callback || noop;
+
+
+    // Create the offer with the required constrains
+
+    pc.createOffer(function(offer)
+    {
+      console.log('Created SDP offer');
+
+      pc.setLocalDescription(offer, function()
+      {
+        console.log('Local description set', offer);
+
+        callback(null, self);
+      },
+      callback);
+    },
+    callback, constraints);
+  }
+
+
+  if(mode !== 'recvonly' && !videoStream)
+  {
+    mediaConstraints = recursive(
+    {
+      audio: true,
+      video:
+      {
+        mandatory:
+        {
+          maxWidth: 640,
+          maxFrameRate: 15,
+          minFrameRate: 15
+        }
+      }
+    }, mediaConstraints);
+
+    getUserMedia(mediaConstraints, function(stream)
+    {
+      videoStream = stream;
+
+      self.start(options.connectionConstraints, callback)
+    },
+    callback || noop);
+  }
+  else
+    self.start(options.connectionConstraints, callback)
+
+
+  /**
+  * @description This method frees the resources used by WebRtcPeer.
+  *
+  * @function module:kurentoUtils.WebRtcPeer.prototype.dispose
+  */
+  this.dispose = function()
+  {
+    console.log('Disposing WebRtcPeer');
+
+    // FIXME This is not yet implemented in firefox
+    // if(videoStream) pc.removeStream(videoStream);
+
+    // For old browsers, PeerConnection.close() is NOT idempotent and raise
+    // error. We check its signaling state and don't close it if it's already
+    // closed
+    if(pc && pc.signalingState != 'closed') pc.close();
+
+    if(localVideo)  localVideo.src  = '';
+    if(remoteVideo) remoteVideo.src = '';
+
+    if(videoStream)
+    {
+      videoStream.getAudioTracks().forEach(trackStop)
+      videoStream.getVideoTracks().forEach(trackStop)
+    }
+
+    if(audioStream)
+      audioStream.getAudioTracks().forEach(trackStop)
+  };
+
+  /**
+  * @description Callback function invoked when and SDP answer is received.
+  *              Developers are expected to invoke this function in order to
+  *              complete the SDP negotiation.
+  *
+  * @function module:kurentoUtils.WebRtcPeer.prototype.processSdpAnswer
+  *
+  * @param sdpAnswer -
+  *            Description of sdpAnswer
+  * @param successCallback -
+  *            Called when the remoteDescription and the remoteVideo.src have
+  *            been set successfully.
+  */
+  this.processSdpAnswer = function(sdpAnswer, callback)
+  {
+    var answer = new RTCSessionDescription(
+    {
+      type : 'answer',
+      sdp : sdpAnswer,
+    });
+
+    console.log('SDP answer received, setting remote description');
+
+    callback = callback || noop
+
+    pc.setRemoteDescription(answer, function()
+    {
+      if(remoteVideo)
+      {
+        remoteVideo.src = URL.createObjectURL(pc.getRemoteStreams()[0]);
+
+        console.log('Remote URL:',remoteVideo.src)
+      }
+
+      callback();
+    },
+    callback);
+  }
+}
+inherits(WebRtcPeer, EventEmitter)
+
+
+WebRtcPeer.prototype.getLocalStream = function(index)
+{
+  if(this.peerConnection)
+    return this.peerConnection.getLocalStreams()[index || 0]
 }
 
-/**
- * @description This method creates the RTCPeerConnection object taking into
- *              account the properties received in the constructor. It starts
- *              the SDP negotiation process: generates the SDP offer and invokes
- *              the onsdpoffer callback. This callback is expected to send the
- *              SDP offer, in order to obtain an SDP answer from another peer.
- *
- * @function module:kurentoUtils.WebRtcPeer.prototype.start
- *
- */
-WebRtcPeer.prototype.start = function(server, options) {
-
-	var self = this;
-
-	server  = server  || this.server;
-	options = options || this.seoptionsrver;
-
-	if (!this.pc) {
-		this.pc = new RTCPeerConnection(server, options);
-	}
-
-	var pc = this.pc;
-
-	if (this.stream && this.localVideo) {
-		this.localVideo.src = URL.createObjectURL(this.stream);
-		this.localVideo.muted = true;
-	}
-
-	if (this.stream) {
-		pc.addStream(this.stream);
-	}
-
-	if (this.audioStream) {
-		pc.addStream(this.audioStream);
-	}
-
-	this.constraints = {
-		mandatory : {
-			OfferToReceiveAudio : (this.remoteVideo !== undefined),
-			OfferToReceiveVideo : (this.remoteVideo !== undefined)
-		}
-	};
-
-	pc.createOffer(function(offer) {
-		console.log('Created SDP offer');
-		pc.setLocalDescription(offer, function() {
-			console.log('Local description set');
-		}, self.onerror);
-
-	}, this.onerror, this.constraints);
-
-	var ended = false;
-	pc.onicecandidate = function(e) {
-		// candidate exists in e.candidate
-		if (e.candidate) {
-			ended = false;
-			return;
-		}
-
-		if (ended) {
-			return;
-		}
-
-		var offerSdp = pc.localDescription.sdp;
-		console.log('ICE negotiation completed');
-
-		self.onsdpoffer(offerSdp, self);
-		// self.emit('sdpoffer', offerSdp);
-
-		ended = true;
-	};
+WebRtcPeer.prototype.getRemoteStream = function(index)
+{
+  if(this.peerConnection)
+    return this.peerConnection.getRemoteStreams()[index || 0]
 }
 
-/**
- * @description This method frees the resources used by WebRtcPeer.
- *
- * @function module:kurentoUtils.WebRtcPeer.prototype.dispose
- */
-WebRtcPeer.prototype.dispose = function() {
-	console.log('Disposing WebRtcPeer');
 
-	// FIXME This is not yet implemented in firefox
-	// if (this.stream) this.pc.removeStream(this.stream);
-
-	// For old browsers, PeerConnection.close() is NOT idempotent and raise
-	// error. We check its signaling state and don't close it if it's already
-	// closed
-	if (this.pc && this.pc.signalingState != 'closed')
-		this.pc.close();
-
-	if (this.localVideo)
-		this.localVideo.src = '';
-	if (this.remoteVideo)
-		this.remoteVideo.src = '';
-
-	if (this.stream) {
-		this.stream.getAudioTracks().forEach(function(track) {
-			track.stop && track.stop()
-		})
-		this.stream.getVideoTracks().forEach(function(track) {
-			track.stop && track.stop()
-		})
-	}
-};
-
-/**
- * @description Default user media constraints considered when invoking the
- *              getUserMedia function. These values are: maxWidth=640,
- *              maxFrameRate=15, minFrameRate=15.
- *
- * @alias module:kurentoUtils.WebRtcPeer.prototype.userMediaConstraints
- */
-WebRtcPeer.prototype.userMediaConstraints = {
-	audio : true,
-	video : {
-		mandatory : {
-			maxWidth : 640,
-			maxFrameRate : 15,
-			minFrameRate : 15
-		}
-	}
-};
-
-/**
- * @description Callback function invoked when and SDP answer is received.
- *              Developers are expected to invoke this function in order to
- *              complete the SDP negotiation.
- *
- * @function module:kurentoUtils.WebRtcPeer.prototype.processSdpAnswer
- *
- * @param sdpAnswer -
- *            Description of sdpAnswer
- * @param successCallback -
- *            Called when the remoteDescription and the remoteVideo.src have
- *            been set successfully.
- */
-WebRtcPeer.prototype.processSdpAnswer = function(sdpAnswer, successCallback) {
-	var answer = new RTCSessionDescription({
-		type : 'answer',
-		sdp : sdpAnswer,
-	});
-
-	console.log('SDP answer received, setting remote description');
-	var self = this;
-	self.pc.setRemoteDescription(answer, function() {
-		if (self.remoteVideo) {
-			var stream = self.pc.getRemoteStreams()[0];
-			self.remoteVideo.src = URL.createObjectURL(stream);
-		}
-		if (successCallback) {
-			successCallback();
-		}
-	}, this.onerror);
-}
-
-/**
- * @description Default ICE server (stun:stun.l.google.com:19302).
- *
- * @alias module:kurentoUtils.WebRtcPeer.prototype.server
- */
-WebRtcPeer.prototype.server = {
-	iceServers : freeice()
-};
-
-/**
- * @description Default options (DtlsSrtpKeyAgreement=true) for
- *              RTCPeerConnection.
- *
- * @alias module:kurentoUtils.WebRtcPeer.prototype.options
- */
-WebRtcPeer.prototype.options = {
-	optional : [ {
-		DtlsSrtpKeyAgreement : true
-	} ]
-};
+//
+// Static factory functions
+//
 
 /**
  * @description This method creates the WebRtcPeer object and obtain userMedia
@@ -287,24 +356,25 @@ WebRtcPeer.prototype.options = {
  *
  * @return {module:kurentoUtils.WebRtcPeer}
  */
-WebRtcPeer.start = function(mode, localVideo, remoteVideo, onSdp, onerror,
-		mediaConstraints, videoStream, audioStream, server, options) {
-	var wp = new WebRtcPeer(mode, localVideo, remoteVideo, onSdp, onerror,
-			videoStream, audioStream);
+WebRtcPeer.start = function(mode, localVideo, remoteVideo, onsdpoffer, onerror,
+    mediaConstraints, videoStream, audioStream, configuration,
+    connectionConstraints, callback)
+{
+  var options =
+  {
+    localVideo      : localVideo,
+    remoteVideo     : remoteVideo,
+    onsdpoffer      : onsdpoffer,
+    onerror         : onerror,
+    mediaConstraints: mediaConstraints,
+    videoStream     : videoStream,
+    audioStream     : audioStream,
+    configuration   : configuration,
 
-	if (wp.mode !== 'recv' && !wp.stream) {
-		var constraints = mediaConstraints ? mediaConstraints
-				: wp.userMediaConstraints;
+    connectionConstraints: connectionConstraints
+  };
 
-		getUserMedia(constraints, function(userStream) {
-			wp.stream = userStream;
-			wp.start(server, options);
-		}, wp.onerror);
-	} else {
-		wp.start(server, options);
-	}
-
-	return wp;
+  return new WebRtcPeer(mode, options, callback);
 };
 
 /**
@@ -325,9 +395,11 @@ WebRtcPeer.start = function(mode, localVideo, remoteVideo, onSdp, onerror,
  * @return {module:kurentoUtils.WebRtcPeer}
  */
 WebRtcPeer.startRecvOnly = function(remoteVideo, onSdp, onError,
-		mediaConstraints, server, options) {
-	return WebRtcPeer.start('recv', null, remoteVideo, onSdp, onError,
-			mediaConstraints, server, options);
+  mediaConstraints, configuration, connectionConstraints, callback)
+{
+  return WebRtcPeer.start('recvonly', null, remoteVideo, onSdp, onError,
+      mediaConstraints, null, null, configuration, connectionConstraints,
+      callback);
 };
 
 /**
@@ -348,9 +420,11 @@ WebRtcPeer.startRecvOnly = function(remoteVideo, onSdp, onError,
  * @return {module:kurentoUtils.WebRtcPeer}
  */
 WebRtcPeer.startSendOnly = function(localVideo, onSdp, onError,
-		mediaConstraints, server, options) {
-	return WebRtcPeer.start('send', localVideo, null, onSdp, onError,
-			mediaConstraints, server, options);
+  mediaConstraints, configuration, connectionConstraints, callback)
+{
+  return WebRtcPeer.start('sendonly', localVideo, null, onSdp, onError,
+      mediaConstraints, null, null, configuration, connectionConstraints,
+      callback);
 };
 
 /**
@@ -373,14 +447,45 @@ WebRtcPeer.startSendOnly = function(localVideo, onSdp, onError,
  * @return {module:kurentoUtils.WebRtcPeer}
  */
 WebRtcPeer.startSendRecv = function(localVideo, remoteVideo, onSdp, onError,
-		mediaConstraints, server, options) {
-	return WebRtcPeer.start('sendRecv', localVideo, remoteVideo, onSdp,
-			onError, mediaConstraints, server, options);
+  mediaConstraints, configuration, connectionConstraints, callback)
+{
+  return WebRtcPeer.start('sendrecv', localVideo, remoteVideo, onSdp,
+      onError, mediaConstraints, null, null, configuration,
+      connectionConstraints, callback);
 };
+
+
+//
+// Specialized child classes
+//
+
+function WebRtcPeerRecvonly(options)
+{
+  WebRtcPeerRecvonly.super_.call(this, 'recvonly', options)
+}
+inherits(WebRtcPeerRecvonly, WebRtcPeer)
+
+function WebRtcPeerSendonly(options)
+{
+  WebRtcPeerSendonly.super_.call(this, 'sendonly', options)
+}
+inherits(WebRtcPeerSendonly, WebRtcPeer)
+
+function WebRtcPeerSendrecv(options)
+{
+  WebRtcPeerSendrecv.super_.call(this, 'sendrecv', options)
+}
+inherits(WebRtcPeerSendrecv, WebRtcPeer)
+
 
 module.exports = WebRtcPeer;
 
-},{"freeice":3}],2:[function(require,module,exports){
+WebRtcPeer.WebRtcPeer         = WebRtcPeer;
+WebRtcPeer.WebRtcPeerRecvonly = WebRtcPeerRecvonly;
+WebRtcPeer.WebRtcPeerSendonly = WebRtcPeerSendonly;
+WebRtcPeer.WebRtcPeerSendrecv = WebRtcPeerSendrecv;
+
+},{"events":7,"freeice":3,"inherits":8,"merge":9}],2:[function(require,module,exports){
 /*
  * (C) Copyright 2014 Kurento (http://kurento.org/)
  *
@@ -593,5 +698,509 @@ module.exports=[
 },{}],6:[function(require,module,exports){
 module.exports=[]
 
+},{}],7:[function(require,module,exports){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+function EventEmitter() {
+  this._events = this._events || {};
+  this._maxListeners = this._maxListeners || undefined;
+}
+module.exports = EventEmitter;
+
+// Backwards-compat with node 0.10.x
+EventEmitter.EventEmitter = EventEmitter;
+
+EventEmitter.prototype._events = undefined;
+EventEmitter.prototype._maxListeners = undefined;
+
+// By default EventEmitters will print a warning if more than 10 listeners are
+// added to it. This is a useful default which helps finding memory leaks.
+EventEmitter.defaultMaxListeners = 10;
+
+// Obviously not all Emitters should be limited to 10. This function allows
+// that to be increased. Set to zero for unlimited.
+EventEmitter.prototype.setMaxListeners = function(n) {
+  if (!isNumber(n) || n < 0 || isNaN(n))
+    throw TypeError('n must be a positive number');
+  this._maxListeners = n;
+  return this;
+};
+
+EventEmitter.prototype.emit = function(type) {
+  var er, handler, len, args, i, listeners;
+
+  if (!this._events)
+    this._events = {};
+
+  // If there is no 'error' event listener then throw.
+  if (type === 'error') {
+    if (!this._events.error ||
+        (isObject(this._events.error) && !this._events.error.length)) {
+      er = arguments[1];
+      if (er instanceof Error) {
+        throw er; // Unhandled 'error' event
+      }
+      throw TypeError('Uncaught, unspecified "error" event.');
+    }
+  }
+
+  handler = this._events[type];
+
+  if (isUndefined(handler))
+    return false;
+
+  if (isFunction(handler)) {
+    switch (arguments.length) {
+      // fast cases
+      case 1:
+        handler.call(this);
+        break;
+      case 2:
+        handler.call(this, arguments[1]);
+        break;
+      case 3:
+        handler.call(this, arguments[1], arguments[2]);
+        break;
+      // slower
+      default:
+        len = arguments.length;
+        args = new Array(len - 1);
+        for (i = 1; i < len; i++)
+          args[i - 1] = arguments[i];
+        handler.apply(this, args);
+    }
+  } else if (isObject(handler)) {
+    len = arguments.length;
+    args = new Array(len - 1);
+    for (i = 1; i < len; i++)
+      args[i - 1] = arguments[i];
+
+    listeners = handler.slice();
+    len = listeners.length;
+    for (i = 0; i < len; i++)
+      listeners[i].apply(this, args);
+  }
+
+  return true;
+};
+
+EventEmitter.prototype.addListener = function(type, listener) {
+  var m;
+
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  if (!this._events)
+    this._events = {};
+
+  // To avoid recursion in the case that type === "newListener"! Before
+  // adding it to the listeners, first emit "newListener".
+  if (this._events.newListener)
+    this.emit('newListener', type,
+              isFunction(listener.listener) ?
+              listener.listener : listener);
+
+  if (!this._events[type])
+    // Optimize the case of one listener. Don't need the extra array object.
+    this._events[type] = listener;
+  else if (isObject(this._events[type]))
+    // If we've already got an array, just append.
+    this._events[type].push(listener);
+  else
+    // Adding the second element, need to change to array.
+    this._events[type] = [this._events[type], listener];
+
+  // Check for listener leak
+  if (isObject(this._events[type]) && !this._events[type].warned) {
+    var m;
+    if (!isUndefined(this._maxListeners)) {
+      m = this._maxListeners;
+    } else {
+      m = EventEmitter.defaultMaxListeners;
+    }
+
+    if (m && m > 0 && this._events[type].length > m) {
+      this._events[type].warned = true;
+      console.error('(node) warning: possible EventEmitter memory ' +
+                    'leak detected. %d listeners added. ' +
+                    'Use emitter.setMaxListeners() to increase limit.',
+                    this._events[type].length);
+      if (typeof console.trace === 'function') {
+        // not supported in IE 10
+        console.trace();
+      }
+    }
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.on = EventEmitter.prototype.addListener;
+
+EventEmitter.prototype.once = function(type, listener) {
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  var fired = false;
+
+  function g() {
+    this.removeListener(type, g);
+
+    if (!fired) {
+      fired = true;
+      listener.apply(this, arguments);
+    }
+  }
+
+  g.listener = listener;
+  this.on(type, g);
+
+  return this;
+};
+
+// emits a 'removeListener' event iff the listener was removed
+EventEmitter.prototype.removeListener = function(type, listener) {
+  var list, position, length, i;
+
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  if (!this._events || !this._events[type])
+    return this;
+
+  list = this._events[type];
+  length = list.length;
+  position = -1;
+
+  if (list === listener ||
+      (isFunction(list.listener) && list.listener === listener)) {
+    delete this._events[type];
+    if (this._events.removeListener)
+      this.emit('removeListener', type, listener);
+
+  } else if (isObject(list)) {
+    for (i = length; i-- > 0;) {
+      if (list[i] === listener ||
+          (list[i].listener && list[i].listener === listener)) {
+        position = i;
+        break;
+      }
+    }
+
+    if (position < 0)
+      return this;
+
+    if (list.length === 1) {
+      list.length = 0;
+      delete this._events[type];
+    } else {
+      list.splice(position, 1);
+    }
+
+    if (this._events.removeListener)
+      this.emit('removeListener', type, listener);
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.removeAllListeners = function(type) {
+  var key, listeners;
+
+  if (!this._events)
+    return this;
+
+  // not listening for removeListener, no need to emit
+  if (!this._events.removeListener) {
+    if (arguments.length === 0)
+      this._events = {};
+    else if (this._events[type])
+      delete this._events[type];
+    return this;
+  }
+
+  // emit removeListener for all listeners on all events
+  if (arguments.length === 0) {
+    for (key in this._events) {
+      if (key === 'removeListener') continue;
+      this.removeAllListeners(key);
+    }
+    this.removeAllListeners('removeListener');
+    this._events = {};
+    return this;
+  }
+
+  listeners = this._events[type];
+
+  if (isFunction(listeners)) {
+    this.removeListener(type, listeners);
+  } else {
+    // LIFO order
+    while (listeners.length)
+      this.removeListener(type, listeners[listeners.length - 1]);
+  }
+  delete this._events[type];
+
+  return this;
+};
+
+EventEmitter.prototype.listeners = function(type) {
+  var ret;
+  if (!this._events || !this._events[type])
+    ret = [];
+  else if (isFunction(this._events[type]))
+    ret = [this._events[type]];
+  else
+    ret = this._events[type].slice();
+  return ret;
+};
+
+EventEmitter.listenerCount = function(emitter, type) {
+  var ret;
+  if (!emitter._events || !emitter._events[type])
+    ret = 0;
+  else if (isFunction(emitter._events[type]))
+    ret = 1;
+  else
+    ret = emitter._events[type].length;
+  return ret;
+};
+
+function isFunction(arg) {
+  return typeof arg === 'function';
+}
+
+function isNumber(arg) {
+  return typeof arg === 'number';
+}
+
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+
+function isUndefined(arg) {
+  return arg === void 0;
+}
+
+},{}],8:[function(require,module,exports){
+if (typeof Object.create === 'function') {
+  // implementation from standard node.js 'util' module
+  module.exports = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor
+    ctor.prototype = Object.create(superCtor.prototype, {
+      constructor: {
+        value: ctor,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+  };
+} else {
+  // old school shim for old browsers
+  module.exports = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor
+    var TempCtor = function () {}
+    TempCtor.prototype = superCtor.prototype
+    ctor.prototype = new TempCtor()
+    ctor.prototype.constructor = ctor
+  }
+}
+
+},{}],9:[function(require,module,exports){
+/*!
+ * @name JavaScript/NodeJS Merge v1.2.0
+ * @author yeikos
+ * @repository https://github.com/yeikos/js.merge
+
+ * Copyright 2014 yeikos - MIT license
+ * https://raw.github.com/yeikos/js.merge/master/LICENSE
+ */
+
+;(function(isNode) {
+
+	/**
+	 * Merge one or more objects 
+	 * @param bool? clone
+	 * @param mixed,... arguments
+	 * @return object
+	 */
+
+	var Public = function(clone) {
+
+		return merge(clone === true, false, arguments);
+
+	}, publicName = 'merge';
+
+	/**
+	 * Merge two or more objects recursively 
+	 * @param bool? clone
+	 * @param mixed,... arguments
+	 * @return object
+	 */
+
+	Public.recursive = function(clone) {
+
+		return merge(clone === true, true, arguments);
+
+	};
+
+	/**
+	 * Clone the input removing any reference
+	 * @param mixed input
+	 * @return mixed
+	 */
+
+	Public.clone = function(input) {
+
+		var output = input,
+			type = typeOf(input),
+			index, size;
+
+		if (type === 'array') {
+
+			output = [];
+			size = input.length;
+
+			for (index=0;index<size;++index)
+
+				output[index] = Public.clone(input[index]);
+
+		} else if (type === 'object') {
+
+			output = {};
+
+			for (index in input)
+
+				output[index] = Public.clone(input[index]);
+
+		}
+
+		return output;
+
+	};
+
+	/**
+	 * Merge two objects recursively
+	 * @param mixed input
+	 * @param mixed extend
+	 * @return mixed
+	 */
+
+	function merge_recursive(base, extend) {
+
+		if (typeOf(base) !== 'object')
+
+			return extend;
+
+		for (var key in extend) {
+
+			if (typeOf(base[key]) === 'object' && typeOf(extend[key]) === 'object') {
+
+				base[key] = merge_recursive(base[key], extend[key]);
+
+			} else {
+
+				base[key] = extend[key];
+
+			}
+
+		}
+
+		return base;
+
+	}
+
+	/**
+	 * Merge two or more objects
+	 * @param bool clone
+	 * @param bool recursive
+	 * @param array argv
+	 * @return object
+	 */
+
+	function merge(clone, recursive, argv) {
+
+		var result = argv[0],
+			size = argv.length;
+
+		if (clone || typeOf(result) !== 'object')
+
+			result = {};
+
+		for (var index=0;index<size;++index) {
+
+			var item = argv[index],
+
+				type = typeOf(item);
+
+			if (type !== 'object') continue;
+
+			for (var key in item) {
+
+				var sitem = clone ? Public.clone(item[key]) : item[key];
+
+				if (recursive) {
+
+					result[key] = merge_recursive(result[key], sitem);
+
+				} else {
+
+					result[key] = sitem;
+
+				}
+
+			}
+
+		}
+
+		return result;
+
+	}
+
+	/**
+	 * Get type of variable
+	 * @param mixed input
+	 * @return string
+	 *
+	 * @see http://jsperf.com/typeofvar
+	 */
+
+	function typeOf(input) {
+
+		return ({}).toString.call(input).slice(8, -1).toLowerCase();
+
+	}
+
+	if (isNode) {
+
+		module.exports = Public;
+
+	} else {
+
+		window[publicName] = Public;
+
+	}
+
+})(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
 },{}]},{},[2])(2)
 });
