@@ -304,6 +304,9 @@ function WebRtcPeer(mode, options, callback)
 inherits(WebRtcPeer, EventEmitter)
 
 
+WebRtcPeer.prototype.server = {}
+
+
 WebRtcPeer.prototype.getLocalStream = function(index)
 {
   if(this.peerConnection)
@@ -542,7 +545,9 @@ var normalice = require('normalice');
   ## Hey, don't use my STUN/TURN server!
 
   If for some reason your free STUN or TURN server ends up in the
-  [list](servers.js) of servers that is used in this module, you can feel
+  list of servers ([stun](https://github.com/DamonOehlman/freeice/blob/master/stun.json) or
+  [turn](https://github.com/DamonOehlman/freeice/blob/master/turn.json))
+  that is used in this module, you can feel
   free to open an issue on this repository and those servers will be removed
   within 24 hours (or sooner).  This is the quickest and probably the most
   polite way to have something removed (and provides us some visibility
@@ -692,7 +697,8 @@ module.exports=[
   "stun.voiparound.com",
   "stun.voipbuster.com",
   "stun.voipstunt.com",
-  "stun.voxgratia.org"
+  "stun.voxgratia.org",
+  "stun.services.mozilla.com"
 ]
 
 },{}],6:[function(require,module,exports){
