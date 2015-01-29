@@ -31,6 +31,11 @@ function trackStop(track)
   track.stop && track.stop()
 }
 
+function streamStop(stream)
+{
+  stream.getTracks().forEach(trackStop)
+}
+
 
 /**
  * @classdesc Wrapper object of an RTCPeerConnection. This object is aimed to
@@ -116,6 +121,13 @@ function WebRtcPeer(mode, options, callback)
 
   var self = this;
 
+  function onSdpOffer_callback(error, sdpAnswer, callback)
+  {
+    if(error) return console.error(error)
+
+    self.processSdpAnswer(sdpAnswer, callback)
+  }
+
   var ended = false;
   pc.addEventListener('icecandidate', function(event)
   {
@@ -131,7 +143,7 @@ function WebRtcPeer(mode, options, callback)
     if(ended) return;
     ended = true;
 
-    self.emit('sdpoffer', pc.localDescription.sdp);
+    self.emit('sdpoffer', pc.localDescription.sdp, onSdpOffer_callback);
     console.log('ICE negotiation completed');
   });
 
@@ -169,6 +181,9 @@ function WebRtcPeer(mode, options, callback)
       callback    = constraints
       constraints = undefined
     }
+
+    // [Hack] https://code.google.com/p/chromium/issues/detail?id=443558
+    if(mode == 'sendonly') mode = 'sendrecv';
 
     constraints = recursive(
     {
@@ -232,74 +247,21 @@ function WebRtcPeer(mode, options, callback)
     self.start(options.connectionConstraints, callback)
 
 
-  /**
-  * @description This method frees the resources used by WebRtcPeer.
-  *
-  * @function module:kurentoUtils.WebRtcPeer.prototype.dispose
-  */
-  this.dispose = function()
+  this.on('_dispose', function()
   {
-    console.log('Disposing WebRtcPeer');
-
-    // FIXME This is not yet implemented in firefox
-    // if(videoStream) pc.removeStream(videoStream);
-
-    // For old browsers, PeerConnection.close() is NOT idempotent and raise
-    // error. We check its signaling state and don't close it if it's already
-    // closed
-    if(pc && pc.signalingState != 'closed') pc.close();
-
     if(localVideo)  localVideo.src  = '';
     if(remoteVideo) remoteVideo.src = '';
+  })
 
-    if(videoStream)
-    {
-      videoStream.getAudioTracks().forEach(trackStop)
-      videoStream.getVideoTracks().forEach(trackStop)
-    }
-
-    if(audioStream)
-      audioStream.getAudioTracks().forEach(trackStop)
-  };
-
-  /**
-  * @description Callback function invoked when and SDP answer is received.
-  *              Developers are expected to invoke this function in order to
-  *              complete the SDP negotiation.
-  *
-  * @function module:kurentoUtils.WebRtcPeer.prototype.processSdpAnswer
-  *
-  * @param sdpAnswer -
-  *            Description of sdpAnswer
-  * @param successCallback -
-  *            Called when the remoteDescription and the remoteVideo.src have
-  *            been set successfully.
-  */
-  this.processSdpAnswer = function(sdpAnswer, callback)
+  this.on('_processSdpAnswer', function(url)
   {
-    var answer = new RTCSessionDescription(
+    if(remoteVideo)
     {
-      type : 'answer',
-      sdp : sdpAnswer,
-    });
+      remoteVideo.src = url;
 
-    console.log('SDP answer received, setting remote description');
-
-    callback = callback || noop
-
-    pc.setRemoteDescription(answer, function()
-    {
-      if(remoteVideo)
-      {
-        remoteVideo.src = URL.createObjectURL(pc.getRemoteStreams()[0]);
-
-        console.log('Remote URL:',remoteVideo.src)
-      }
-
-      callback();
-    },
-    callback);
-  }
+      console.log('Remote URL:', url)
+    }
+  })
 }
 inherits(WebRtcPeer, EventEmitter)
 
@@ -318,6 +280,144 @@ WebRtcPeer.prototype.getRemoteStream = function(index)
   if(this.peerConnection)
     return this.peerConnection.getRemoteStreams()[index || 0]
 }
+
+/**
+* @description This method frees the resources used by WebRtcPeer.
+*
+* @function module:kurentoUtils.WebRtcPeer.prototype.dispose
+*/
+WebRtcPeer.prototype.dispose = function()
+{
+  console.log('Disposing WebRtcPeer');
+
+  var pc = this.peerConnection;
+  if(pc)
+  {
+    // FIXME This is not yet implemented in firefox
+    // if(videoStream) pc.removeStream(videoStream);
+    // if(audioStream) pc.removeStream(audioStream);
+
+    // For old browsers, PeerConnection.close() is NOT idempotent and raise
+    // error. We check its signaling state and don't close it if it's already
+    // closed
+    if(pc.signalingState != 'closed') pc.close();
+
+    pc.getLocalStreams().forEach(streamStop)
+  }
+
+  this.emit('_dispose');
+};
+
+/**
+ * @description Callback function invoked when and SDP answer is received.
+ *              Developers are expected to invoke this function in order to
+ *              complete the SDP negotiation.
+ *
+ * @function module:kurentoUtils.WebRtcPeer.prototype.processSdpAnswer
+ *
+ * @param sdpAnswer -
+ *            Description of sdpAnswer
+ * @param successCallback -
+ *            Called when the remoteDescription and the remoteVideo.src have
+ *            been set successfully.
+ */
+WebRtcPeer.prototype.processSdpAnswer = function(sdpAnswer, callback)
+{
+  var answer = new RTCSessionDescription(
+  {
+    type : 'answer',
+    sdp : sdpAnswer,
+  });
+
+  console.log('SDP answer received, setting remote description');
+
+  callback = callback || noop
+
+  var self = this;
+
+  var pc = this.peerConnection;
+  pc.setRemoteDescription(answer, function()
+  {
+    var url = URL.createObjectURL(pc.getRemoteStreams()[0]);
+
+    self.emit('_processSdpAnswer', url);
+
+    callback();
+  },
+  callback);
+}
+
+
+Object.defineProperty(WebRtcPeer.prototype, 'enabled',
+{
+  enumerable: true,
+  get: function()
+  {
+    return this.audioEnabled && this.videoEnabled;
+  },
+  set: function(value)
+  {
+    this.audioEnabled = this.videoEnabled = value
+  }
+})
+
+Object.defineProperty(WebRtcPeer.prototype, 'audioEnabled',
+{
+  enumerable: true,
+  get: function()
+  {
+    if(!this.peerConnection) return;
+
+    var streams = this.peerConnection.getLocalStreams();
+    if(!streams.length) return;
+
+    for(var i=0,stream; stream=streams[i]; i++)
+      for(var j=0,track; track=stream.getAudioTracks()[j]; j++)
+        if(!track.enabled)
+          return false;
+
+    return true;
+  },
+  set: function(value)
+  {
+    this.peerConnection.getLocalStreams().forEach(function(stream)
+    {
+      stream.getAudioTracks().forEach(function(track)
+      {
+        track.enabled = value;
+      })
+    })
+  }
+})
+
+Object.defineProperty(WebRtcPeer.prototype, 'videoEnabled',
+{
+  enumerable: true,
+  get: function()
+  {
+    if(!this.peerConnection) return;
+
+    var streams = this.peerConnection.getLocalStreams();
+    if(!streams.length) return;
+
+    for(var i=0,stream; stream=streams[i]; i++)
+      for(var j=0,track; track=stream.getVideoTracks()[j]; j++)
+        if(!track.enabled)
+          return false;
+
+    return true;
+  },
+  set: function(value)
+  {
+    this.peerConnection.getLocalStreams().forEach(function(stream)
+    {
+      stream.getVideoTracks().forEach(function(track)
+      {
+        track.enabled = value;
+      })
+    })
+  }
+})
 
 
 //
