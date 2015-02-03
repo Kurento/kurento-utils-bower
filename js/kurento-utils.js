@@ -76,6 +76,14 @@ function WebRtcPeer(mode, options, callback)
 
   var localVideo, remoteVideo, onsdpoffer, onerror, mediaConstraints;
   var videoStream, audioStream, connectionConstraints;
+  var pc;
+
+  var configuration = recursive(
+  {
+    iceServers : freeice()
+  },
+  WebRtcPeer.prototype.server);
+
 
   switch(mode)
   {
@@ -117,6 +125,9 @@ function WebRtcPeer(mode, options, callback)
     audioStream      = options.audioStream;
 
     connectionConstraints = options.connectionConstraints;
+    pc                    = options.peerConnection
+
+    configuration = recursive(configuration, options.configuration);
   }
 
   if(onerror)    this.on('error',    onerror);
@@ -125,18 +136,7 @@ function WebRtcPeer(mode, options, callback)
 
   // Init PeerConnection
 
-  var pc = options.peerConnection
-  if(!pc)
-  {
-    var configuration = recursive(
-    {
-      iceServers : freeice()
-    },
-    WebRtcPeer.prototype.server,
-    options.configuration);
-
-    pc = new RTCPeerConnection(configuration);
-  }
+  if(!pc) pc = new RTCPeerConnection(configuration);
 
   Object.defineProperty(this, 'peerConnection', {get: function(){return pc;}});
 
@@ -262,12 +262,12 @@ function WebRtcPeer(mode, options, callback)
     {
       videoStream = stream;
 
-      self.start(options.connectionConstraints, callback)
+      self.start(connectionConstraints, callback)
     },
     callback || noop);
   }
   else
-    self.start(options.connectionConstraints, callback)
+    self.start(connectionConstraints, callback)
 
 
   this.on('_dispose', function()
