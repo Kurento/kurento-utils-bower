@@ -23,7 +23,13 @@ var recursive = require('merge').recursive
 
 function noop(error)
 {
-  if(error) console.trace(error)
+  if(error)
+  {
+    if(console.trace)
+      return console.trace(error)
+
+    console.error(error)
+  }
 }
 
 function trackStop(track)
@@ -71,6 +77,13 @@ function WebRtcPeer(mode, options, callback)
   var localVideo, remoteVideo, onsdpoffer, onerror, mediaConstraints;
   var videoStream, audioStream, connectionConstraints;
 
+  switch(mode)
+  {
+    case 'recv': mode = 'recvonly'; break
+    case 'send': mode = 'sendonly'; break
+  }
+
+
   while(arguments.length && !arguments[arguments.length-1]) arguments.length--;
 
   if(arguments.length > 2)  // Deprecated mode
@@ -87,6 +100,14 @@ function WebRtcPeer(mode, options, callback)
   }
   else
   {
+    if(options instanceof Function)
+    {
+      callback = options
+      options = undefined
+    }
+
+    options = options || {}
+
     localVideo       = options.localVideo;
     remoteVideo      = options.remoteVideo;
     onsdpoffer       = options.onsdpoffer;
@@ -198,7 +219,9 @@ function WebRtcPeer(mode, options, callback)
       ]
     }, constraints);
 
-    callback = callback || noop;
+    console.log('constraints: '+JSON.stringify(constraints));
+
+    callback = (callback || noop).bind(this);
 
 
     // Create the offer with the required constrains
