@@ -80,7 +80,7 @@ function WebRtcPeer(mode, options, callback)
 
   var configuration = recursive(
   {
-    iceServers : freeice()
+    iceServers: freeice()
   },
   WebRtcPeer.prototype.server);
 
@@ -242,7 +242,9 @@ function WebRtcPeer(mode, options, callback)
   }
 
 
-  if(mode !== 'recvonly' && !videoStream)
+  callback = (callback || noop).bind(this)
+
+  if(mode !== 'recvonly' && !videoStream && !audioStream)
   {
     mediaConstraints = recursive(
     {
@@ -264,7 +266,7 @@ function WebRtcPeer(mode, options, callback)
 
       self.start(connectionConstraints, callback)
     },
-    callback || noop);
+    callback);
   }
   else
     self.start(connectionConstraints, callback)
@@ -283,6 +285,78 @@ function WebRtcPeer(mode, options, callback)
       remoteVideo.src = url;
 
       console.log('Remote URL:', url)
+    }
+  })
+
+
+  Object.defineProperty(this, 'enabled',
+  {
+    enumerable: true,
+    get: function()
+    {
+      return this.audioEnabled && this.videoEnabled;
+    },
+    set: function(value)
+    {
+      this.audioEnabled = this.videoEnabled = value
+    }
+  })
+
+  Object.defineProperty(this, 'audioEnabled',
+  {
+    enumerable: true,
+    get: function()
+    {
+      if(!this.peerConnection) return;
+
+      var streams = this.peerConnection.getLocalStreams();
+      if(!streams.length) return;
+
+      for(var i=0,stream; stream=streams[i]; i++)
+        for(var j=0,track; track=stream.getAudioTracks()[j]; j++)
+          if(!track.enabled)
+            return false;
+
+      return true;
+    },
+    set: function(value)
+    {
+      this.peerConnection.getLocalStreams().forEach(function(stream)
+      {
+        stream.getAudioTracks().forEach(function(track)
+        {
+          track.enabled = value;
+        })
+      })
+    }
+  })
+
+  Object.defineProperty(this, 'videoEnabled',
+  {
+    enumerable: true,
+    get: function()
+    {
+      if(!this.peerConnection) return;
+
+      var streams = this.peerConnection.getLocalStreams();
+      if(!streams.length) return;
+
+      for(var i=0,stream; stream=streams[i]; i++)
+        for(var j=0,track; track=stream.getVideoTracks()[j]; j++)
+          if(!track.enabled)
+            return false;
+
+      return true;
+    },
+    set: function(value)
+    {
+      this.peerConnection.getLocalStreams().forEach(function(stream)
+      {
+        stream.getVideoTracks().forEach(function(track)
+        {
+          track.enabled = value;
+        })
+      })
     }
   })
 }
@@ -316,6 +390,8 @@ WebRtcPeer.prototype.dispose = function()
   var pc = this.peerConnection;
   if(pc)
   {
+    pc.getLocalStreams().forEach(streamStop)
+
     // FIXME This is not yet implemented in firefox
     // if(videoStream) pc.removeStream(videoStream);
     // if(audioStream) pc.removeStream(audioStream);
@@ -324,8 +400,6 @@ WebRtcPeer.prototype.dispose = function()
     // error. We check its signaling state and don't close it if it's already
     // closed
     if(pc.signalingState != 'closed') pc.close();
-
-    pc.getLocalStreams().forEach(streamStop)
   }
 
   this.emit('_dispose');
@@ -354,14 +428,16 @@ WebRtcPeer.prototype.processSdpAnswer = function(sdpAnswer, callback)
 
   console.log('SDP answer received, setting remote description');
 
-  callback = callback || noop
+  callback = (callback || noop).bind(this)
 
   var self = this;
 
   var pc = this.peerConnection;
   pc.setRemoteDescription(answer, function()
   {
-    var url = URL.createObjectURL(pc.getRemoteStreams()[0]);
+    var stream = pc.getRemoteStreams()[0]
+
+    var url = stream ? URL.createObjectURL(stream) : "";
 
     self.emit('_processSdpAnswer', url);
 
@@ -369,78 +445,6 @@ WebRtcPeer.prototype.processSdpAnswer = function(sdpAnswer, callback)
   },
   callback);
 }
-
-
-Object.defineProperty(WebRtcPeer.prototype, 'enabled',
-{
-  enumerable: true,
-  get: function()
-  {
-    return this.audioEnabled && this.videoEnabled;
-  },
-  set: function(value)
-  {
-    this.audioEnabled = this.videoEnabled = value
-  }
-})
-
-Object.defineProperty(WebRtcPeer.prototype, 'audioEnabled',
-{
-  enumerable: true,
-  get: function()
-  {
-    if(!this.peerConnection) return;
-
-    var streams = this.peerConnection.getLocalStreams();
-    if(!streams.length) return;
-
-    for(var i=0,stream; stream=streams[i]; i++)
-      for(var j=0,track; track=stream.getAudioTracks()[j]; j++)
-        if(!track.enabled)
-          return false;
-
-    return true;
-  },
-  set: function(value)
-  {
-    this.peerConnection.getLocalStreams().forEach(function(stream)
-    {
-      stream.getAudioTracks().forEach(function(track)
-      {
-        track.enabled = value;
-      })
-    })
-  }
-})
-
-Object.defineProperty(WebRtcPeer.prototype, 'videoEnabled',
-{
-  enumerable: true,
-  get: function()
-  {
-    if(!this.peerConnection) return;
-
-    var streams = this.peerConnection.getLocalStreams();
-    if(!streams.length) return;
-
-    for(var i=0,stream; stream=streams[i]; i++)
-      for(var j=0,track; track=stream.getVideoTracks()[j]; j++)
-        if(!track.enabled)
-          return false;
-
-    return true;
-  },
-  set: function(value)
-  {
-    this.peerConnection.getLocalStreams().forEach(function(stream)
-    {
-      stream.getVideoTracks().forEach(function(track)
-      {
-        track.enabled = value;
-      })
-    })
-  }
-})
 
 
 //
