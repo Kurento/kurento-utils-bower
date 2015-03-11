@@ -1,6 +1,6 @@
-!function(e){if("object"==typeof exports&&"undefined"!=typeof module)module.exports=e();else if("function"==typeof define&&define.amd)define([],e);else{var f;"undefined"!=typeof window?f=window:"undefined"!=typeof global?f=global:"undefined"!=typeof self&&(f=self),f.kurentoUtils=e()}}(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.kurentoUtils = f()}})(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 /*
- * (C) Copyright 2014 Kurento (http://kurento.org/)
+ * (C) Copyright 2014-2015 Kurento (http://kurento.org/)
  *
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the GNU Lesser General Public License
@@ -38,13 +38,7 @@ const MEDIA_CONSTRAINTS =
 
 function noop(error)
 {
-  if(error)
-  {
-    if(console.trace)
-      return console.trace(error)
-
-    console.error(error)
-  }
+  if(error) return console.trace(error)
 }
 
 function trackStop(track)
@@ -59,97 +53,59 @@ function streamStop(stream)
 
 
 /**
- * @classdesc Wrapper object of an RTCPeerConnection. This object is aimed to
- *            simplify the development of WebRTC-based applications.
+ * Wrapper object of an RTCPeerConnection. This object is aimed to simplify the
+ * development of WebRTC-based applications.
  *
  * @constructor module:kurentoUtils.WebRtcPeer
  *
- * @param mode -
- *            {String} Mode in which the PeerConnection will be configured.
- *            Valid values are: 'recv', 'send', and 'sendRecv'
- * @param localVideo -
- *            {Object} Video tag for the local stream
- * @param remoteVideo -
- *            {Object} Video tag for the remote stream
- * @param onsdpoffer -
- *            {Function} Callback executed when a SDP offer has been generated
- * @param onerror -
- *            {Function} Callback executed when an error happens generating an
- *            SDP offer
- * @param videoStream -
- *            {Object} MediaStream to be used as primary source (typically video
- *            and audio, or only video if combined with audioStream) for
- *            localVideo and to be added as stream to the RTCPeerConnection
- * @param audioStream -
- *            {Object} MediaStream to be used as second source (typically for
- *            audio) for localVideo and to be added as stream to the
- *            RTCPeerConnection
+ * @param {String} mode Mode in which the PeerConnection will be configured.
+ *  Valid values are: 'recv', 'send', and 'sendRecv'
+ * @param localVideo Video tag for the local stream
+ * @param remoteVideo Video tag for the remote stream
+ * @param {MediaStream} videoStream Stream to be used as primary source
+ *  (typically video and audio, or only video if combined with audioStream) for
+ *  localVideo and to be added as stream to the RTCPeerConnection
+ * @param {MediaStream} audioStream Stream to be used as second source
+ *  (typically for audio) for localVideo and to be added as stream to the
+ *  RTCPeerConnection
  */
 function WebRtcPeer(mode, options, callback)
 {
+  if(!(this instanceof WebRtcPeer))
+    return new WebRtcPeer(mode, options, callback)
+
   WebRtcPeer.super_.call(this)
 
-  var localVideo, remoteVideo, onsdpoffer, onerror, mediaConstraints;
-  var videoStream, audioStream, connectionConstraints;
-  var pc, sendSource;
+  if(options instanceof Function)
+  {
+    callback = options
+    options = undefined
+  }
+
+  options = options || {}
+  callback = (callback || noop).bind(this)
+
+  var localVideo       = options.localVideo;
+  var remoteVideo      = options.remoteVideo;
+  var videoStream      = options.videoStream;
+  var audioStream      = options.audioStream;
+  var mediaConstraints = options.mediaConstraints;
+
+  var connectionConstraints = options.connectionConstraints;
+  var pc                    = options.peerConnection
+  var sendSource            = options.sendSource || 'webcam'
 
   var configuration = recursive(
   {
     iceServers: freeice()
   },
-  WebRtcPeer.prototype.server);
+  options.configuration);
 
-
-  switch(mode)
-  {
-    case 'recv': mode = 'recvonly'; break
-    case 'send': mode = 'sendonly'; break
-  }
-
-
-  while(arguments.length && !arguments[arguments.length-1]) arguments.length--;
-
-  if(arguments.length > 3)  // Deprecated mode
-  {
-    console.warn('Positional parameters are deprecated for WebRtcPeer')
-
-    localVideo       = arguments[1];
-    remoteVideo      = arguments[2];
-    onsdpoffer       = arguments[3];
-    onerror          = arguments[4];
-    mediaConstraints = arguments[5];
-    videoStream      = arguments[6];
-    audioStream      = arguments[7];
-  }
-  else
-  {
-    if(options instanceof Function)
-    {
-      callback = options
-      options = undefined
-    }
-
-    options = options || {}
-
-    localVideo       = options.localVideo;
-    remoteVideo      = options.remoteVideo;
-    onsdpoffer       = options.onsdpoffer;
-    onerror          = options.onerror;
-    onicecandidate   = options.onicecandidate;
-    mediaConstraints = options.mediaConstraints;
-    videoStream      = options.videoStream;
-    audioStream      = options.audioStream;
-
-    connectionConstraints = options.connectionConstraints;
-    pc                    = options.peerConnection
-    sendSource            = options.sendSource || 'webcam'
-
-    configuration = recursive(configuration, options.configuration);
-  }
-
-  if(onerror)    this.on('error',    onerror);
-  if(onsdpoffer) this.on('sdpoffer', onsdpoffer);
+  var onicecandidate = options.onicecandidate;
   if(onicecandidate) this.on('icecandidate', onicecandidate);
+
+  var oncandidategatheringdone = options.oncandidategatheringdone;
+  if(oncandidategatheringdone) this.on('candidategatheringdone', oncandidategatheringdone);
 
 
   // Init PeerConnection
@@ -160,34 +116,73 @@ function WebRtcPeer(mode, options, callback)
 
   var self = this;
 
-  function onSdpOffer_callback(error, sdpAnswer, callback)
-  {
-    if(error) return console.error(error)
-
-    self.processSdpAnswer(sdpAnswer, callback)
-  }
-
+  var candidategatheringdone = false
   pc.addEventListener('icecandidate', function(event)
   {
     if(event.candidate)
+    {
       self.emit('icecandidate', event.candidate);
+      candidategatheringdone = false
+    }
+    else if(!candidategatheringdone)
+    {
+      self.emit('candidategatheringdone');
+      candidategatheringdone = true
+    }
   });
 
 
-  //
-  // Priviledged methods
-  //
+  /**
+   * Callback function invoked when a SDP answer is received. Developers are
+   * expected to invoke this function in order to complete the SDP negotiation.
+   *
+   * @function module:kurentoUtils.WebRtcPeer.prototype.processSdpAnswer
+   *
+   * @param sdpAnswer - Description of sdpAnswer
+   * @param callback - Called when the remote description has been set
+   *  successfully.
+   */
+  function processSdpAnswer(sdpAnswer, callback)
+  {
+    callback = (callback || noop).bind(self)
+
+    var answer = new RTCSessionDescription(
+    {
+      type : 'answer',
+      sdp : sdpAnswer,
+    });
+
+    console.log('SDP answer received, setting remote description');
+
+    if(pc.signalingState == 'closed')
+      return callback('PeerConnection is closed')
+
+    pc.setRemoteDescription(answer, function()
+    {
+      var stream = pc.getRemoteStreams()[0]
+
+      var url = stream ? URL.createObjectURL(stream) : "";
+
+      if(remoteVideo)
+      {
+        remoteVideo.src = url;
+
+        console.log('Remote URL:', url)
+      }
+
+      callback();
+    },
+    callback);
+  }
 
   /**
-  * @description This method creates the RTCPeerConnection object taking into
-  *              account the properties received in the constructor. It starts
-  *              the SDP negotiation process: generates the SDP offer and invokes
-  *              the onsdpoffer callback. This callback is expected to send the
-  *              SDP offer, in order to obtain an SDP answer from another peer.
-  *
-  * @function module:kurentoUtils.WebRtcPeer.prototype.start
+  * This function creates the RTCPeerConnection object taking into account the
+  * properties received in the constructor. It starts the SDP negotiation
+  * process: generates the SDP offer and invokes the onsdpoffer callback. This
+  * callback is expected to send the SDP offer, in order to obtain an SDP
+  * answer from another peer.
   */
-  this.start = function(constraints, callback)
+  function start(constraints)
   {
     if(videoStream && localVideo)
     {
@@ -197,16 +192,6 @@ function WebRtcPeer(mode, options, callback)
 
     if(videoStream) pc.addStream(videoStream);
     if(audioStream) pc.addStream(audioStream);
-
-    // Adjust arguments
-
-    if(constraints instanceof Function)
-    {
-      if(callback) throw new Error('Nothing can be defined after the callback')
-
-      callback    = constraints
-      constraints = undefined
-    }
 
     // [Hack] https://code.google.com/p/chromium/issues/detail?id=443558
     if(mode == 'sendonly') mode = 'sendrecv';
@@ -226,8 +211,6 @@ function WebRtcPeer(mode, options, callback)
 
     console.log('constraints: '+JSON.stringify(constraints));
 
-    callback = (callback || noop).bind(this);
-
 
     // Create the offer with the required constraints
 
@@ -239,9 +222,7 @@ function WebRtcPeer(mode, options, callback)
       {
         console.log('Local description set', offer);
 
-        self.emit('sdpoffer', offer.sdp, onSdpOffer_callback);
-
-        callback(null, self, offer);
+        callback(null, offer.sdp, processSdpAnswer);
       },
       callback);
     },
@@ -249,21 +230,19 @@ function WebRtcPeer(mode, options, callback)
   }
 
 
-  callback = (callback || noop).bind(this)
-
-  function getMedia(constraints)
-  {
-    getUserMedia(recursive(MEDIA_CONSTRAINTS, constraints), function(stream)
-    {
-      videoStream = stream;
-
-      self.start(connectionConstraints, callback)
-    },
-    callback);
-  }
-
   if(mode !== 'recvonly' && !videoStream && !audioStream)
   {
+    function getMedia(constraints)
+    {
+      getUserMedia(recursive(MEDIA_CONSTRAINTS, constraints), function(stream)
+      {
+        videoStream = stream;
+
+        start(connectionConstraints)
+      },
+      callback);
+    }
+
     if(sendSource && sendSource != 'webcam' && !mediaConstraints)
       getScreenConstraints(sendMode, function(error, constraints)
       {
@@ -276,7 +255,7 @@ function WebRtcPeer(mode, options, callback)
       getMedia(mediaConstraints)
   }
   else
-    self.start(connectionConstraints, callback)
+    start(connectionConstraints)
 
 
   this.on('_dispose', function()
@@ -284,93 +263,65 @@ function WebRtcPeer(mode, options, callback)
     if(localVideo)  localVideo.src  = '';
     if(remoteVideo) remoteVideo.src = '';
   })
-
-  this.on('_processSdpAnswer', function(url)
-  {
-    if(remoteVideo)
-    {
-      remoteVideo.src = url;
-
-      console.log('Remote URL:', url)
-    }
-  })
-
-
-  Object.defineProperty(this, 'enabled',
-  {
-    enumerable: true,
-    get: function()
-    {
-      return this.audioEnabled && this.videoEnabled;
-    },
-    set: function(value)
-    {
-      this.audioEnabled = this.videoEnabled = value
-    }
-  })
-
-  Object.defineProperty(this, 'audioEnabled',
-  {
-    enumerable: true,
-    get: function()
-    {
-      if(!this.peerConnection) return;
-
-      var streams = this.peerConnection.getLocalStreams();
-      if(!streams.length) return;
-
-      for(var i=0,stream; stream=streams[i]; i++)
-        for(var j=0,track; track=stream.getAudioTracks()[j]; j++)
-          if(!track.enabled)
-            return false;
-
-      return true;
-    },
-    set: function(value)
-    {
-      this.peerConnection.getLocalStreams().forEach(function(stream)
-      {
-        stream.getAudioTracks().forEach(function(track)
-        {
-          track.enabled = value;
-        })
-      })
-    }
-  })
-
-  Object.defineProperty(this, 'videoEnabled',
-  {
-    enumerable: true,
-    get: function()
-    {
-      if(!this.peerConnection) return;
-
-      var streams = this.peerConnection.getLocalStreams();
-      if(!streams.length) return;
-
-      for(var i=0,stream; stream=streams[i]; i++)
-        for(var j=0,track; track=stream.getVideoTracks()[j]; j++)
-          if(!track.enabled)
-            return false;
-
-      return true;
-    },
-    set: function(value)
-    {
-      this.peerConnection.getLocalStreams().forEach(function(stream)
-      {
-        stream.getVideoTracks().forEach(function(track)
-        {
-          track.enabled = value;
-        })
-      })
-    }
-  })
 }
 inherits(WebRtcPeer, EventEmitter)
 
 
-WebRtcPeer.prototype.server = {}
+Object.defineProperty(WebRtcPeer.prototype, 'enabled',
+{
+  enumerable: true,
+  get: function()
+  {
+    return this.audioEnabled && this.videoEnabled;
+  },
+  set: function(value)
+  {
+    this.audioEnabled = this.videoEnabled = value
+  }
+})
+
+function createEnableDescriptor(type)
+{
+  var method = 'get'+type+'Tracks'
+
+  return {
+    enumerable: true,
+    get: function()
+    {
+      // [ToDo] Should return undefined if not all tracks have the same value?
+
+      if(!this.peerConnection) return;
+
+      var streams = this.peerConnection.getLocalStreams();
+      if(!streams.length) return;
+
+      for(var i=0,stream; stream=streams[i]; i++)
+      {
+        var tracks = stream[method]()
+        for(var j=0,track; track=tracks[j]; j++)
+          if(!track.enabled)
+            return false;
+      }
+
+      return true;
+    },
+    set: function(value)
+    {
+      function trackSetEnable(track)
+      {
+        track.enabled = value;
+      }
+
+      this.peerConnection.getLocalStreams().forEach(function(stream)
+      {
+        stream[method]().forEach(trackSetEnable)
+      })
+    }
+  }
+}
+
+Object.defineProperty(WebRtcPeer.prototype, 'audioEnabled', createEnableDescriptor('Audio'))
+Object.defineProperty(WebRtcPeer.prototype, 'videoEnabled', createEnableDescriptor('Video'))
 
 
 /**
@@ -432,215 +383,41 @@ WebRtcPeer.prototype.dispose = function()
 };
 
 
-/**
- * Callback function invoked when a SDP answer is received. Developers are
- * expected to invoke this function in order to complete the SDP negotiation.
- *
- * @function module:kurentoUtils.WebRtcPeer.prototype.processSdpAnswer
- *
- * @param sdpAnswer - Description of sdpAnswer
- * @param callback - Called when the remote description has been set
- *  successfully.
- */
-WebRtcPeer.prototype.processSdpAnswer = function(sdpAnswer, callback)
-{
-  var answer = new RTCSessionDescription(
-  {
-    type : 'answer',
-    sdp : sdpAnswer,
-  });
-
-  console.log('SDP answer received, setting remote description');
-
-  callback = (callback || noop).bind(this)
-
-  var pc = this.peerConnection;
-  if(pc.signalingState == 'closed')
-    return callback('PeerConnection is closed')
-
-  var self = this;
-
-  pc.setRemoteDescription(answer, function()
-  {
-    var stream = pc.getRemoteStreams()[0]
-
-    var url = stream ? URL.createObjectURL(stream) : "";
-
-    self.emit('_processSdpAnswer', url);
-
-    callback();
-  },
-  callback);
-}
-
-
-//
-// Static factory functions
-//
-
-/**
- * @description This method creates the WebRtcPeer object and obtain userMedia
- *              if needed.
- *
- * @function module:kurentoUtils.WebRtcPeer.start
- *
- * @param mode -
- *            {String} Mode in which the PeerConnection will be configured.
- *            Valid values are: 'recv', 'send', and 'sendRecv'
- * @param localVideo -
- *            {Object} Video tag for the local stream
- * @param remoteVideo -
- *            {Object} Video tag for the remote stream
- * @param onSdp -
- *            {Function} Callback executed when a SDP offer has been generated
- * @param onerror -
- *            {Function} Callback executed when an error happens generating an
- *            SDP offer
- * @param mediaConstraints -
- *            {Object[]} Constraints used to create RTCPeerConnection
- * @param videoStream -
- *            {Object} MediaStream to be used as primary source (typically video
- *            and audio, or only video if combined with audioStream) for
- *            localVideo and to be added as stream to the RTCPeerConnection
- * @param videoStream -
- *            {Object} MediaStream to be used as primary source (typically video
- *            and audio, or only video if combined with audioStream) for
- *            localVideo and to be added as stream to the RTCPeerConnection
- * @param audioStream -
- *            {Object} MediaStream to be used as second source (typically for
- *            audio) for localVideo and to be added as stream to the
- *            RTCPeerConnection
- *
- * @return {module:kurentoUtils.WebRtcPeer}
- */
-WebRtcPeer.start = function(mode, localVideo, remoteVideo, onsdpoffer, onerror,
-    mediaConstraints, videoStream, audioStream, configuration,
-    connectionConstraints, callback)
-{
-  var options =
-  {
-    localVideo      : localVideo,
-    remoteVideo     : remoteVideo,
-    onsdpoffer      : onsdpoffer,
-    onerror         : onerror,
-    mediaConstraints: mediaConstraints,
-    videoStream     : videoStream,
-    audioStream     : audioStream,
-    configuration   : configuration,
-
-    connectionConstraints: connectionConstraints
-  };
-
-  return new WebRtcPeer(mode, options, callback);
-};
-
-/**
- * @description This methods creates a WebRtcPeer to receive video.
- *
- * @function module:kurentoUtils.WebRtcPeer.startRecvOnly
- *
- * @param remoteVideo -
- *            {Object} Video tag for the remote stream
- * @param onSdp -
- *            {Function} Callback executed when a SDP offer has been generated
- * @param onerror -
- *            {Function} Callback executed when an error happens generating an
- *            SDP offer
- * @param mediaConstraints -
- *            {Object[]} Constraints used to create RTCPeerConnection
- *
- * @return {module:kurentoUtils.WebRtcPeer}
- */
-WebRtcPeer.startRecvOnly = function(remoteVideo, onSdp, onError,
-  mediaConstraints, configuration, connectionConstraints, callback)
-{
-  return WebRtcPeer.start('recvonly', null, remoteVideo, onSdp, onError,
-      mediaConstraints, null, null, configuration, connectionConstraints,
-      callback);
-};
-
-/**
- * @description This methods creates a WebRtcPeer to send video.
- *
- * @function module:kurentoUtils.WebRtcPeer.startSendOnly
- *
- * @param localVideo -
- *            {Object} Video tag for the local stream
- * @param onSdp -
- *            {Function} Callback executed when a SDP offer has been generated
- * @param onerror -
- *            {Function} Callback executed when an error happens generating an
- *            SDP offer
- * @param mediaConstraints -
- *            {Object[]} Constraints used to create RTCPeerConnection
- *
- * @return {module:kurentoUtils.WebRtcPeer}
- */
-WebRtcPeer.startSendOnly = function(localVideo, onSdp, onError,
-  mediaConstraints, configuration, connectionConstraints, callback)
-{
-  return WebRtcPeer.start('sendonly', localVideo, null, onSdp, onError,
-      mediaConstraints, null, null, configuration, connectionConstraints,
-      callback);
-};
-
-/**
- * @description This methods creates a WebRtcPeer to send and receive video.
- *
- * @function module:kurentoUtils.WebRtcPeer.startSendRecv
- *
- * @param localVideo -
- *            {Object} Video tag for the local stream
- * @param remoteVideo -
- *            {Object} Video tag for the remote stream
- * @param onSdp -
- *            {Function} Callback executed when a SDP offer has been generated
- * @param onerror -
- *            {Function} Callback executed when an error happens generating an
- *            SDP offer
- * @param mediaConstraints -
- *            {Object[]} Constraints used to create RTCPeerConnection
- *
- * @return {module:kurentoUtils.WebRtcPeer}
- */
-WebRtcPeer.startSendRecv = function(localVideo, remoteVideo, onSdp, onError,
-  mediaConstraints, configuration, connectionConstraints, callback)
-{
-  return WebRtcPeer.start('sendrecv', localVideo, remoteVideo, onSdp,
-      onError, mediaConstraints, null, null, configuration,
-      connectionConstraints, callback);
-};
-
-
 //
 // Specialized child classes
 //
 
 function WebRtcPeerRecvonly(options, callback)
 {
+  if(!(this instanceof WebRtcPeerRecvonly))
+    return new WebRtcPeerRecvonly(options, callback)
+
   WebRtcPeerRecvonly.super_.call(this, 'recvonly', options, callback)
 }
 inherits(WebRtcPeerRecvonly, WebRtcPeer)
 
 function WebRtcPeerSendonly(options, callback)
 {
+  if(!(this instanceof WebRtcPeerSendonly))
+    return new WebRtcPeerSendonly(options, callback)
+
   WebRtcPeerSendonly.super_.call(this, 'sendonly', options,callback)
 }
 inherits(WebRtcPeerSendonly, WebRtcPeer)
 
 function WebRtcPeerSendrecv(options, callback)
 {
+  if(!(this instanceof WebRtcPeerSendrecv))
+    return new WebRtcPeerSendrecv(options, callback)
+
   WebRtcPeerSendrecv.super_.call(this, 'sendrecv', options, callback)
 }
 inherits(WebRtcPeerSendrecv, WebRtcPeer)
 
 
-module.exports = WebRtcPeer;
-
-WebRtcPeer.WebRtcPeer         = WebRtcPeer;
-WebRtcPeer.WebRtcPeerRecvonly = WebRtcPeerRecvonly;
-WebRtcPeer.WebRtcPeerSendonly = WebRtcPeerSendonly;
-WebRtcPeer.WebRtcPeerSendrecv = WebRtcPeerSendrecv;
+exports.WebRtcPeerRecvonly = WebRtcPeerRecvonly;
+exports.WebRtcPeerSendonly = WebRtcPeerSendonly;
+exports.WebRtcPeerSendrecv = WebRtcPeerSendrecv;
 
 },{"events":7,"freeice":3,"inherits":8,"merge":9}],2:[function(require,module,exports){
 /*
