@@ -130,17 +130,41 @@ function WebRtcPeer(mode, options, callback) {
 
   var self = this;
 
+  var candidatesQueueOut = []
+
   var candidategatheringdone = false
   pc.addEventListener('icecandidate', function (event) {
     var candidate = event.candidate
-    if (candidate) {
-      self.emit('icecandidate', candidate);
-      candidategatheringdone = false
-    } else if (!candidategatheringdone) {
-      self.emit('candidategatheringdone');
-      candidategatheringdone = true
+
+    if (EventEmitter.listenerCount(self, 'icecandidate') || EventEmitter.listenerCount(
+        self, 'candidategatheringdone')) {
+      if (candidate) {
+        self.emit('icecandidate', candidate);
+        candidategatheringdone = false
+      } else if (!candidategatheringdone) {
+        self.emit('candidategatheringdone');
+        candidategatheringdone = true
+      }
+    }
+
+    // Not listening to 'icecandidate' or 'candidategatheringdone' events, queue
+    // the candidate until one of them is listened
+    else if (!candidategatheringdone) {
+      candidatesQueueOut.push(candidate)
+
+      if (!candidate) candidategatheringdone = true
     }
   });
+
+  this.on('newListener', function (event, listener) {
+    if (event === 'icecandidate' || event === 'candidategatheringdone')
+      while (candidatesQueueOut.length) {
+        var candidate = candidatesQueueOut.shift()
+
+        if (!candidate === (event === 'candidategatheringdone'))
+          listener(candidate)
+      }
+  })
 
   var candidatesQueue = []
 
@@ -180,7 +204,7 @@ function WebRtcPeer(mode, options, callback) {
   }
 
   pc.addEventListener('signalingstatechange', function () {
-    if (this.signalingState == 'stable')
+    if (this.signalingState === 'stable')
       while (candidatesQueue.length) {
         var entry = candidatesQueue.shift()
 
@@ -354,9 +378,8 @@ function WebRtcPeer(mode, options, callback) {
       })
     else
       getMedia(mediaConstraints)
-  } else {
+  } else
     setTimeout(start, 0)
-  }
 
   this.on('_dispose', function () {
     if (localVideo) localVideo.src = '';
