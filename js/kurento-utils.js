@@ -413,7 +413,7 @@ function WebRtcPeer(mode, options, callback) {
     }
 
     if (sendSource != 'webcam' && !mediaConstraints)
-      getScreenConstraints(sendMode, function (error, constraints) {
+      getScreenConstraints(sendSource, function (error, constraints) {
         if (error) return callback(error)
 
         getMedia(constraints)
