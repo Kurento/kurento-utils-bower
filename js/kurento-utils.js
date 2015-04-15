@@ -20,7 +20,7 @@ var EventEmitter = require('events').EventEmitter;
 
 var recursive = require('merge').recursive
 
-const MEDIA_CONSTRAINTS = {
+var MEDIA_CONSTRAINTS = {
   audio: true,
   video: {
     mandatory: {
@@ -41,6 +41,41 @@ function trackStop(track) {
 
 function streamStop(stream) {
   stream.getTracks().forEach(trackStop)
+}
+
+function bufferizeCandidates(pc, onerror) {
+  var candidatesQueue = []
+
+  pc.addEventListener('signalingstatechange', function () {
+    if (this.signalingState === 'stable')
+      while (candidatesQueue.length) {
+        var entry = candidatesQueue.shift()
+
+        this.addIceCandidate(entry.candidate, entry.callback, entry.callback);
+      }
+  })
+
+  return function (candidate, callback) {
+    callback = callback || onerror
+
+    switch (pc.signalingState) {
+    case 'closed':
+      callback(new Error('PeerConnection object is closed'))
+      break
+
+    case 'stable':
+      if (pc.remoteDescription) {
+        pc.addIceCandidate(candidate, callback, callback)
+        break;
+      }
+
+    default:
+      candidatesQueue.push({
+        candidate: candidate,
+        callback: callback
+      })
+    }
+  }
 }
 
 /**
@@ -166,7 +201,7 @@ function WebRtcPeer(mode, options, callback) {
       }
   })
 
-  var candidatesQueue = []
+  var addIceCandidate = bufferizeCandidates(pc)
 
   /**
    * Callback function invoked when an ICE candidate is received. Developers are
@@ -184,33 +219,8 @@ function WebRtcPeer(mode, options, callback) {
 
     callback = (callback || noop).bind(this)
 
-    switch (pc.signalingState) {
-    case 'closed':
-      Callback(new Error('PeerConnection object is closed'))
-      break
-
-    case 'stable':
-      if (pc.remoteDescription) {
-        pc.addIceCandidate(candidate, callback, callback);
-        break;
-      }
-
-    default:
-      candidatesQueue.push({
-        candidate: candidate,
-        callback: callback
-      })
-    }
+    addIceCandidate(candidate, callback)
   }
-
-  pc.addEventListener('signalingstatechange', function () {
-    if (this.signalingState === 'stable')
-      while (candidatesQueue.length) {
-        var entry = candidatesQueue.shift()
-
-        this.addIceCandidate(entry.candidate, entry.callback, entry.callback);
-      }
-  })
 
   this.generateOffer = function (callback) {
     callback = callback.bind(this)
@@ -499,11 +509,31 @@ function WebRtcPeerSendrecv(options, callback) {
 }
 inherits(WebRtcPeerSendrecv, WebRtcPeer)
 
+exports.bufferizeCandidates = bufferizeCandidates
+
 exports.WebRtcPeerRecvonly = WebRtcPeerRecvonly;
 exports.WebRtcPeerSendonly = WebRtcPeerSendonly;
 exports.WebRtcPeerSendrecv = WebRtcPeerSendrecv;
 
-},{"events":7,"freeice":3,"inherits":8,"merge":9}],2:[function(require,module,exports){
+},{"events":8,"freeice":4,"inherits":9,"merge":10}],2:[function(require,module,exports){
+/*
+ * (C) Copyright 2015 Kurento (http://kurento.org/)
+ *
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the GNU Lesser General Public License
+ * (LGPL) version 2.1 which accompanies this distribution, and is available at
+ * http://www.gnu.org/licenses/lgpl-2.1.html
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * Lesser General Public License for more details.
+ */
+
+// Don't run on Internet Explorer 8, so exit inmediatly
+if (window.addEventListener) module.exports = require('./index');
+
+},{"./index":3}],3:[function(require,module,exports){
 /*
  * (C) Copyright 2014 Kurento (http://kurento.org/)
  *
@@ -533,7 +563,7 @@ var WebRtcPeer = require('./WebRtcPeer');
 
 exports.WebRtcPeer = WebRtcPeer;
 
-},{"./WebRtcPeer":1}],3:[function(require,module,exports){
+},{"./WebRtcPeer":1}],4:[function(require,module,exports){
 /* jshint node: true */
 'use strict';
 
@@ -635,7 +665,7 @@ var freeice = module.exports = function(opts) {
   return selected;
 };
 
-},{"./stun.json":5,"./turn.json":6,"normalice":4}],4:[function(require,module,exports){
+},{"./stun.json":6,"./turn.json":7,"normalice":5}],5:[function(require,module,exports){
 /**
   # normalice
 
@@ -697,7 +727,7 @@ module.exports = function(input) {
   return output;
 };
 
-},{}],5:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 module.exports=[
   "stun.l.google.com:19302",
   "stun1.l.google.com:19302",
@@ -716,10 +746,10 @@ module.exports=[
   "stun.services.mozilla.com"
 ]
 
-},{}],6:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 module.exports=[]
 
-},{}],7:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -1022,7 +1052,7 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}],8:[function(require,module,exports){
+},{}],9:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -1047,7 +1077,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],9:[function(require,module,exports){
+},{}],10:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.2.0
  * @author yeikos
