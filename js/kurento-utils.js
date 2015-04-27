@@ -19,7 +19,7 @@ var UAParser = require('ua-parser-js');
 
 var EventEmitter = require('events').EventEmitter;
 
-var recursive = require('merge').recursive;
+var recursive = require('merge').recursive.bind(undefined, true);
 
 var MEDIA_CONSTRAINTS = {
   audio: true,
