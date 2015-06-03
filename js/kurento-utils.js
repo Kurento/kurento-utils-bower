@@ -6,7 +6,7 @@ var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 try {
     (function () {
-        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-merge-project/lib\'');
+        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-merge-project@3/lib\'');
     }());
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
@@ -247,19 +247,21 @@ function WebRtcPeer(mode, options, callback) {
     }
     if (mode !== 'recvonly' && !videoStream && !audioStream) {
         function getMedia(constraints) {
-            getUserMedia(recursive(MEDIA_CONSTRAINTS, constraints), function (stream) {
+            constraints = Array.prototype.slice.call(arguments);
+            constraints.unshift(MEDIA_CONSTRAINTS);
+            getUserMedia(recursive.apply(undefined, constraints), function (stream) {
                 videoStream = stream;
                 start();
             }, callback);
         }
-        if (sendSource != 'webcam' && !mediaConstraints)
+        if (sendSource === 'webcam')
+            getMedia(mediaConstraints);
+        else
             getScreenConstraints(sendSource, function (error, constraints) {
                 if (error)
                     return callback(error);
-                getMedia(constraints);
+                getMedia(constraints, mediaConstraints);
             });
-        else
-            getMedia(mediaConstraints);
     } else
         setTimeout(start, 0);
     this.on('_dispose', function () {
