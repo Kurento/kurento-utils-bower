@@ -6,7 +6,7 @@ var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 try {
     (function () {
-        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-build-project/lib\'');
+        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-merge-project/lib\'');
     }());
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
@@ -228,7 +228,6 @@ function WebRtcPeer(mode, options, callback) {
     function streamEndedListener() {
         self.emit('streamended', this);
     }
-    ;
     function start() {
         if (videoStream && localVideo) {
             self.showLocalVideo();
@@ -269,6 +268,7 @@ function WebRtcPeer(mode, options, callback) {
             localVideo.src = '';
         if (remoteVideo)
             remoteVideo.src = '';
+        self.removeAllListeners();
     });
 }
 inherits(WebRtcPeer, EventEmitter);
