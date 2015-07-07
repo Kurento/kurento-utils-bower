@@ -184,7 +184,7 @@ function WebRtcPeer(mode, options, callback) {
         newPc = createPeerConnection(configuration);
         var browser = parser.getBrowser();
         var firefox34 = browser.name === 'Firefox' && browser.version > 34;
-        var constraints = firefox34 ? {
+        var browserConstraints = firefox34 ? {
                 offerToReceiveAudio: mode !== 'sendonly',
                 offerToReceiveVideo: mode !== 'sendonly'
             } : {
@@ -227,10 +227,8 @@ function WebRtcPeer(mode, options, callback) {
         }
     }
     this.showLocalVideo = function () {
-        if (localVideo && videoStream) {
-            localVideo.src = URL.createObjectURL(videoStream);
-            localVideo.muted = true;
-        }
+        localVideo.src = URL.createObjectURL(videoStream);
+        localVideo.muted = true;
     };
     this.processAnswer = function (sdpAnswer, callback) {
         callback = (callback || noop).bind(this);
@@ -265,7 +263,20 @@ function WebRtcPeer(mode, options, callback) {
         self.emit('streamended', this);
     }
     function start() {
-        self.showLocalVideo();
+        if (pc.signalingState === 'closed') {
+            callback('The peer connection object is in "closed" state. This is most likely due to an invocation of the dispose method before accepting in the dialogue');
+        }
+        if (videoStream && localVideo) {
+            self.showLocalVideo();
+        }
+        if (videoStream) {
+            videoStream.addEventListener('ended', streamEndedListener);
+            pc.addStream(videoStream);
+        }
+        if (audioStream) {
+            audioStream.addEventListener('ended', streamEndedListener);
+            pc.addStream(audioStream);
+        }
         if (mode === 'sendonly')
             mode = 'sendrecv';
         callback();
