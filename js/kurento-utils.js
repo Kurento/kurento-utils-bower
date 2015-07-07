@@ -69,14 +69,6 @@ function bufferizeCandidates(pc, onerror) {
         }
     };
 }
-function getFrame(video) {
-    var canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    var ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
-    return canvas.toDataURL();
-}
 function WebRtcPeer(mode, options, callback) {
     if (!(this instanceof WebRtcPeer)) {
         return new WebRtcPeer(mode, options, callback);
@@ -149,7 +141,7 @@ function WebRtcPeer(mode, options, callback) {
         var pc = new RTCPeerConnection(configuration);
         addIceCandidate = bufferizeCandidates(pc);
         var candidatesQueueOut = [];
-        this.on('newListener', function (event, listener) {
+        self.on('newListener', function (event, listener) {
             if (event === 'icecandidate' || event === 'candidategatheringdone')
                 while (candidatesQueueOut.length) {
                     var candidate = candidatesQueueOut.shift();
@@ -171,7 +163,6 @@ function WebRtcPeer(mode, options, callback) {
         }
         pc.addEventListener('icecandidate', onicecandidate);
         pc.addEventListener('iceconnectionstatechange', oniceconnectionstatechange);
-        pc.addEventListener('signalingstatechange', onsignalingstatechange);
         if (videoStream) {
             videoStream.addEventListener('ended', streamEndedListener);
             pc.addStream(videoStream);
@@ -193,7 +184,7 @@ function WebRtcPeer(mode, options, callback) {
         newPc = createPeerConnection(configuration);
         var browser = parser.getBrowser();
         var firefox34 = browser.name === 'Firefox' && browser.version > 34;
-        var browserConstraints = firefox34 ? {
+        var constraints = firefox34 ? {
                 offerToReceiveAudio: mode !== 'sendonly',
                 offerToReceiveVideo: mode !== 'sendonly'
             } : {
@@ -212,28 +203,34 @@ function WebRtcPeer(mode, options, callback) {
             }, callback);
         }, callback, constraints);
     };
-    this.getLocalSessionDescriptor = function () {
-        return pc.localDescription;
-    };
-    this.getRemoteSessionDescriptor = function () {
-        return pc.remoteDescription;
-    };
     function oniceconnectionstatechange() {
-        if (this.iceConnectionState == 'connected') {
+        if (this.iceConnectionState === 'connected' || this.iceConnectionState === 'completed') {
+            this.removeEventListener('iceconnectionstatechange', oniceconnectionstatechange);
             if (remoteVideo) {
-                var style = remoteVideo.style;
-                var oldBackgroundImage = style.backgroundImage;
+                if (remoteVideo.readyState >= remoteVideo.HAVE_CURRENT_DATA) {
+                    var style = remoteVideo.style;
+                    var oldBackgroundImage = style.backgroundImage;
+                    style.backgroundImage = 'url(\'' + self.currentFrame.toDataURL() + '\')';
+                    if (oldBackgroundImage)
+                        remoteVideo.addEventListener('playing', function onplaying() {
+                            remoteVideo.removeEventListener('playing', onplaying);
+                            style.backgroundImage = oldBackgroundImage;
+                        });
+                }
                 remoteVideo.src = URL.createObjectURL(this.getRemoteStreams()[0]);
                 console.log('Remote URL: ' + remoteVideo.src);
             }
-            pc.close();
+            if (pc)
+                pc.close();
             pc = this;
-            this.removeEventListener('iceconnectionstatechange', oniceconnectionstatechange);
+            self.emit('connected');
         }
     }
     this.showLocalVideo = function () {
-        localVideo.src = URL.createObjectURL(videoStream);
-        localVideo.muted = true;
+        if (localVideo && videoStream) {
+            localVideo.src = URL.createObjectURL(videoStream);
+            localVideo.muted = true;
+        }
     };
     this.processAnswer = function (sdpAnswer, callback) {
         callback = (callback || noop).bind(this);
@@ -259,7 +256,6 @@ function WebRtcPeer(mode, options, callback) {
                 console.log('Created SDP answer');
                 newPc.setLocalDescription(answer, function () {
                     console.log('Local description set', answer.sdp);
-                    pc = newPc;
                     callback(null, answer.sdp);
                 }, callback);
             }, callback);
@@ -269,20 +265,7 @@ function WebRtcPeer(mode, options, callback) {
         self.emit('streamended', this);
     }
     function start() {
-        if (pc.signalingState === 'closed') {
-            callback('The peer connection object is in "closed" state. This is most likely due to an invocation of the dispose method before accepting in the dialogue');
-        }
-        if (videoStream && localVideo) {
-            self.showLocalVideo();
-        }
-        if (videoStream) {
-            videoStream.addEventListener('ended', streamEndedListener);
-            pc.addStream(videoStream);
-        }
-        if (audioStream) {
-            audioStream.addEventListener('ended', streamEndedListener);
-            pc.addStream(audioStream);
-        }
+        self.showLocalVideo();
         if (mode === 'sendonly')
             mode = 'sendrecv';
         callback();
@@ -308,7 +291,15 @@ function WebRtcPeer(mode, options, callback) {
     } else {
         setTimeout(start, 0);
     }
-    this.on('_dispose', function () {
+    this.dispose = function () {
+        console.log('Disposing WebRtcPeer');
+        if (pc) {
+            if (pc.signalingState === 'closed')
+                return;
+            pc.getLocalStreams().forEach(streamStop);
+            pc.close();
+            pc = undefined;
+        }
         if (localVideo) {
             localVideo.pause();
             localVideo.src = '';
@@ -320,12 +311,14 @@ function WebRtcPeer(mode, options, callback) {
             remoteVideo.load();
         }
         self.removeAllListeners();
-        if (window.cancelChooseDesktopMedia !== undefined) {
+        if (window.cancelChooseDesktopMedia !== undefined)
             window.cancelChooseDesktopMedia(guid);
-        }
-    });
+    };
 }
 inherits(WebRtcPeer, EventEmitter);
+function trackSetEnable(track) {
+    track.enabled = this.valueOf();
+}
 function createEnableDescriptor(type) {
     var method = 'get' + type + 'Tracks';
     return {
@@ -345,11 +338,8 @@ function createEnableDescriptor(type) {
             return true;
         },
         set: function (value) {
-            function trackSetEnable(track) {
-                track.enabled = value;
-            }
             this.peerConnection.getLocalStreams().forEach(function (stream) {
-                stream[method]().forEach(trackSetEnable);
+                stream[method]().forEach(trackSetEnable, value);
             });
         }
     };
@@ -367,26 +357,25 @@ Object.defineProperties(WebRtcPeer.prototype, {
     'audioEnabled': createEnableDescriptor('Audio'),
     'videoEnabled': createEnableDescriptor('Video')
 });
+WebRtcPeer.prototype.getLocalSessionDescriptor = function () {
+    var pc = this.peerConnection;
+    if (pc)
+        return pc.localDescription;
+};
+WebRtcPeer.prototype.getRemoteSessionDescriptor = function () {
+    var pc = this.peerConnection;
+    if (pc)
+        return pc.remoteDescription;
+};
 WebRtcPeer.prototype.getLocalStream = function (index) {
-    if (this.peerConnection) {
-        return this.peerConnection.getLocalStreams()[index || 0];
-    }
+    var pc = this.peerConnection;
+    if (pc)
+        return pc.getLocalStreams()[index || 0];
 };
 WebRtcPeer.prototype.getRemoteStream = function (index) {
-    if (this.peerConnection) {
-        return this.peerConnection.getRemoteStreams()[index || 0];
-    }
-};
-WebRtcPeer.prototype.dispose = function () {
-    console.log('Disposing WebRtcPeer');
     var pc = this.peerConnection;
-    if (pc) {
-        if (pc.signalingState === 'closed')
-            return;
-        pc.getLocalStreams().forEach(streamStop);
-        pc.close();
-    }
-    this.emit('_dispose');
+    if (pc)
+        return pc.getRemoteStreams()[index || 0];
 };
 function WebRtcPeerRecvonly(options, callback) {
     if (!(this instanceof WebRtcPeerRecvonly)) {
