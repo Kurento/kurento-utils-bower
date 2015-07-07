@@ -41,15 +41,14 @@ function streamStop(stream) {
 }
 function bufferizeCandidates(pc, onerror) {
     var candidatesQueue = [];
-    function onsignalingstatechange() {
-        if (this.signalingState === 'stable')
+    pc.addEventListener('signalingstatechange', function () {
+        if (this.signalingState === 'stable') {
             while (candidatesQueue.length) {
                 var entry = candidatesQueue.shift();
                 this.addIceCandidate(entry.candidate, entry.callback, entry.callback);
             }
-        this.removeEventListener('signalingstatechange', onsignalingstatechange);
-    }
-    pc.addEventListener('signalingstatechange', onsignalingstatechange);
+        }
+    });
     return function (candidate, callback) {
         callback = callback || onerror;
         switch (pc.signalingState) {
@@ -69,14 +68,6 @@ function bufferizeCandidates(pc, onerror) {
         }
     };
 }
-function getFrame(video) {
-    var canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    var ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
-    return canvas.toDataURL();
-}
 function WebRtcPeer(mode, options, callback) {
     if (!(this instanceof WebRtcPeer)) {
         return new WebRtcPeer(mode, options, callback);
@@ -94,6 +85,7 @@ function WebRtcPeer(mode, options, callback) {
     var audioStream = options.audioStream;
     var mediaConstraints = options.mediaConstraints;
     var connectionConstraints = options.connectionConstraints;
+    var pc = options.peerConnection;
     var sendSource = options.sendSource || 'webcam';
     var guid = uuid.v4();
     var configuration = recursive({ iceServers: freeice() }, options.configuration);
@@ -107,8 +99,8 @@ function WebRtcPeer(mode, options, callback) {
     if (oncandidategatheringdone) {
         this.on('candidategatheringdone', oncandidategatheringdone);
     }
-    var newPc;
-    var pc = options.peerConnection;
+    if (!pc)
+        pc = new RTCPeerConnection(configuration);
     Object.defineProperties(this, {
         'peerConnection': {
             get: function () {
@@ -140,48 +132,35 @@ function WebRtcPeer(mode, options, callback) {
         }
     });
     var self = this;
-    function streamEndedListener() {
-        self.emit('streamended', this);
-    }
-    ;
-    var addIceCandidate;
-    function createPeerConnection(configuration) {
-        var pc = new RTCPeerConnection(configuration);
-        addIceCandidate = bufferizeCandidates(pc);
-        var candidatesQueueOut = [];
-        this.on('newListener', function (event, listener) {
-            if (event === 'icecandidate' || event === 'candidategatheringdone')
-                while (candidatesQueueOut.length) {
-                    var candidate = candidatesQueueOut.shift();
-                    if (!candidate === (event === 'candidategatheringdone'))
-                        listener(candidate);
-                }
-        });
-        function onicecandidate(event) {
-            var candidate = event.candidate;
-            if (EventEmitter.listenerCount(self, 'icecandidate') || EventEmitter.listenerCount(self, 'candidategatheringdone')) {
-                if (candidate)
-                    self.emit('icecandidate', candidate);
-                else
-                    self.emit('candidategatheringdone');
-            } else
-                candidatesQueueOut.push(candidate);
+    var candidatesQueueOut = [];
+    var candidategatheringdone = false;
+    pc.addEventListener('icecandidate', function (event) {
+        var candidate = event.candidate;
+        if (EventEmitter.listenerCount(self, 'icecandidate') || EventEmitter.listenerCount(self, 'candidategatheringdone')) {
+            if (candidate) {
+                self.emit('icecandidate', candidate);
+                candidategatheringdone = false;
+            } else if (!candidategatheringdone) {
+                self.emit('candidategatheringdone');
+                candidategatheringdone = true;
+            }
+        } else if (!candidategatheringdone) {
+            candidatesQueueOut.push(candidate);
             if (!candidate)
-                this.removeEventListener('icecandidate', onicecandidate);
+                candidategatheringdone = true;
         }
-        pc.addEventListener('icecandidate', onicecandidate);
-        pc.addEventListener('iceconnectionstatechange', oniceconnectionstatechange);
-        pc.addEventListener('signalingstatechange', onsignalingstatechange);
-        if (videoStream) {
-            videoStream.addEventListener('ended', streamEndedListener);
-            pc.addStream(videoStream);
+    });
+    this.on('newListener', function (event, listener) {
+        if (event === 'icecandidate' || event === 'candidategatheringdone') {
+            while (candidatesQueueOut.length) {
+                var candidate = candidatesQueueOut.shift();
+                if (!candidate === (event === 'candidategatheringdone')) {
+                    listener(candidate);
+                }
+            }
         }
-        if (audioStream) {
-            audioStream.addEventListener('ended', streamEndedListener);
-            pc.addStream(audioStream);
-        }
-        return pc;
-    }
+    });
+    var addIceCandidate = bufferizeCandidates(pc);
     this.addIceCandidate = function (iceCandidate, callback) {
         var candidate = new RTCIceCandidate(iceCandidate);
         console.log('ICE candidate received');
@@ -190,10 +169,8 @@ function WebRtcPeer(mode, options, callback) {
     };
     this.generateOffer = function (callback) {
         callback = callback.bind(this);
-        newPc = createPeerConnection(configuration);
         var browser = parser.getBrowser();
-        var firefox34 = browser.name === 'Firefox' && browser.version > 34;
-        var browserConstraints = firefox34 ? {
+        var browserDependantConstraints = browser.name === 'Firefox' && browser.version > 34 ? {
                 offerToReceiveAudio: mode !== 'sendonly',
                 offerToReceiveVideo: mode !== 'sendonly'
             } : {
@@ -203,11 +180,12 @@ function WebRtcPeer(mode, options, callback) {
                 },
                 optional: [{ DtlsSrtpKeyAgreement: true }]
             };
-        console.log('constraints:', constraints);
-        newPc.createOffer(function (offer) {
+        var constraints = recursive(browserDependantConstraints, connectionConstraints);
+        console.log('constraints: ' + JSON.stringify(constraints));
+        pc.createOffer(function (offer) {
             console.log('Created SDP offer');
-            newPc.setLocalDescription(offer, function () {
-                console.log('Local description set:', offer.sdp);
+            pc.setLocalDescription(offer, function () {
+                console.log('Local description set', offer.sdp);
                 callback(null, offer.sdp, self.processAnswer.bind(self));
             }, callback);
         }, callback, constraints);
@@ -218,17 +196,14 @@ function WebRtcPeer(mode, options, callback) {
     this.getRemoteSessionDescriptor = function () {
         return pc.remoteDescription;
     };
-    function oniceconnectionstatechange() {
-        if (this.iceConnectionState == 'connected') {
-            if (remoteVideo) {
-                var style = remoteVideo.style;
-                var oldBackgroundImage = style.backgroundImage;
-                remoteVideo.src = URL.createObjectURL(this.getRemoteStreams()[0]);
-                console.log('Remote URL: ' + remoteVideo.src);
-            }
-            pc.close();
-            pc = this;
-            this.removeEventListener('iceconnectionstatechange', oniceconnectionstatechange);
+    function setRemoteVideo() {
+        if (remoteVideo) {
+            var stream = pc.getRemoteStreams()[0];
+            var url = stream ? URL.createObjectURL(stream) : '';
+            remoteVideo.pause();
+            remoteVideo.src = url;
+            remoteVideo.load();
+            console.log('Remote URL:', url);
         }
     }
     this.showLocalVideo = function () {
@@ -242,9 +217,13 @@ function WebRtcPeer(mode, options, callback) {
                 sdp: sdpAnswer
             });
         console.log('SDP answer received, setting remote description');
-        if (newPc.signalingState === 'closed')
+        if (pc.signalingState === 'closed') {
             return callback('PeerConnection is closed');
-        newPc.setRemoteDescription(answer, callback, callback);
+        }
+        pc.setRemoteDescription(answer, function () {
+            setRemoteVideo();
+            callback();
+        }, callback);
     };
     this.processOffer = function (sdpOffer, callback) {
         callback = callback.bind(this);
@@ -253,13 +232,15 @@ function WebRtcPeer(mode, options, callback) {
                 sdp: sdpOffer
             });
         console.log('SDP offer received, setting remote description');
-        newPc = createPeerConnection(configuration);
-        newPc.setRemoteDescription(offer, function () {
-            newPc.createAnswer(function (answer) {
+        if (pc.signalingState === 'closed') {
+            return callback('PeerConnection is closed');
+        }
+        pc.setRemoteDescription(offer, function () {
+            setRemoteVideo();
+            pc.createAnswer(function (answer) {
                 console.log('Created SDP answer');
-                newPc.setLocalDescription(answer, function () {
+                pc.setLocalDescription(answer, function () {
                     console.log('Local description set', answer.sdp);
-                    pc = newPc;
                     callback(null, answer.sdp);
                 }, callback);
             }, callback);
