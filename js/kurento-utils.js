@@ -7,7 +7,7 @@ var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 try {
     (function () {
-        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/Development/kurento_project_js_release/lib\'');
+        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/Development/kurento_js_merge_project/lib\'');
     }());
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
