@@ -264,8 +264,10 @@ function WebRtcPeer(mode, options, callback) {
             audioStream.addEventListener('ended', streamEndedListener);
             pc.addStream(audioStream);
         }
-        if (mode === 'sendonly')
+        var browser = parser.getBrowser();
+        if (mode === 'sendonly' && (browser.name === 'Chrome' || browser.name === 'Chromium') && browser.major === 39) {
             mode = 'sendrecv';
+        }
         callback();
     }
     if (mode !== 'recvonly' && !videoStream && !audioStream) {
@@ -791,7 +793,12 @@ var freeice = module.exports = function(opts) {
     }
 
     return out.map(function(url) {
-      return normalice(type + ':' + url);
+        //If it's a not a string, don't try to "normalice" it otherwise using type:url will screw it up
+        if ((typeof url !== 'string') && (! (url instanceof String))) {
+            return url;
+        } else {
+            return normalice(type + ':' + url);
+        }
     });
   }
 
@@ -876,7 +883,6 @@ module.exports=[
   "stun4.l.google.com:19302",
   "stun.ekiga.net",
   "stun.ideasip.com",
-  "stun.rixtelecom.se",
   "stun.schlund.de",
   "stun.stunprotocol.org:3478",
   "stun.voiparound.com",
