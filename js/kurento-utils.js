@@ -20,10 +20,11 @@ try {
 var MEDIA_CONSTRAINTS = {
         audio: true,
         video: {
-            mandatory: {
-                maxWidth: 640,
-                maxFrameRate: 15,
-                minFrameRate: 15
+            width: { max: 640 },
+            frameRate: {
+                min: 10,
+                ideal: 15,
+                max: 20
             }
         }
     };
@@ -272,9 +273,10 @@ function WebRtcPeer(mode, options, callback) {
     }
     if (mode !== 'recvonly' && !videoStream && !audioStream) {
         function getMedia(constraints) {
-            constraints = Array.prototype.slice.call(arguments);
-            constraints.unshift(MEDIA_CONSTRAINTS);
-            getUserMedia(recursive.apply(undefined, constraints), function (stream) {
+            if (constraints === undefined) {
+                constraints = MEDIA_CONSTRAINTS;
+            }
+            getUserMedia(constraints, function (stream) {
                 videoStream = stream;
                 start();
             }, callback);
@@ -282,10 +284,12 @@ function WebRtcPeer(mode, options, callback) {
         if (sendSource === 'webcam') {
             getMedia(mediaConstraints);
         } else {
-            getScreenConstraints(sendSource, function (error, constraints) {
+            getScreenConstraints(sendSource, function (error, constraints_) {
                 if (error)
                     return callback(error);
-                getMedia(constraints, mediaConstraints);
+                constraints = [mediaConstraints];
+                constraints.unshift(constraints_);
+                getMedia(recursive.apply(undefined, constraints));
             }, guid);
         }
     } else {
