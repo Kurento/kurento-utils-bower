@@ -7,7 +7,7 @@ var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 try {
     (function () {
-        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-build-project/lib\'');
+        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/Development/kurento_js_merge_project/lib\'');
     }());
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
@@ -396,7 +396,7 @@ exports.bufferizeCandidates = bufferizeCandidates;
 exports.WebRtcPeerRecvonly = WebRtcPeerRecvonly;
 exports.WebRtcPeerSendonly = WebRtcPeerSendonly;
 exports.WebRtcPeerSendrecv = WebRtcPeerSendrecv;
-},{"events":4,"freeice":5,"inherits":8,"merge":9,"ua-parser-js":11,"uuid":13}],2:[function(require,module,exports){
+},{"events":4,"freeice":5,"inherits":9,"merge":10,"ua-parser-js":11,"uuid":13}],2:[function(require,module,exports){
 if (window.addEventListener)
     module.exports = require('./index');
 },{"./index":3}],3:[function(require,module,exports){
@@ -812,7 +812,69 @@ var freeice = module.exports = function(opts) {
   return selected;
 };
 
-},{"./stun.json":6,"./turn.json":7,"normalice":10}],6:[function(require,module,exports){
+},{"./stun.json":7,"./turn.json":8,"normalice":6}],6:[function(require,module,exports){
+/**
+  # normalice
+
+  Normalize an ice server configuration object (or plain old string) into a format
+  that is usable in all browsers supporting WebRTC.  Primarily this module is designed
+  to help with the transition of the `url` attribute of the configuration object to
+  the `urls` attribute.
+
+  ## Example Usage
+
+  <<< examples/simple.js
+
+**/
+
+var protocols = [
+  'stun:',
+  'turn:'
+];
+
+module.exports = function(input) {
+  var url = (input || {}).url || input;
+  var protocol;
+  var parts;
+  var output = {};
+
+  // if we don't have a string url, then allow the input to passthrough
+  if (typeof url != 'string' && (! (url instanceof String))) {
+    return input;
+  }
+
+  // trim the url string, and convert to an array
+  url = url.trim();
+
+  // if the protocol is not known, then passthrough
+  protocol = protocols[protocols.indexOf(url.slice(0, 5))];
+  if (! protocol) {
+    return input;
+  }
+
+  // now let's attack the remaining url parts
+  url = url.slice(5);
+  parts = url.split('@');
+
+  output.username = input.username;
+  output.credential = input.credential;
+  // if we have an authentication part, then set the credentials
+  if (parts.length > 1) {
+    url = parts[1];
+    parts = parts[0].split(':');
+
+    // add the output credential and username
+    output.username = parts[0];
+    output.credential = (input || {}).credential || parts[1] || '';
+  }
+
+  output.url = protocol + url;
+  output.urls = [ output.url ];
+
+  return output;
+};
+
+},{}],7:[function(require,module,exports){
 module.exports=[
   "stun.l.google.com:19302",
   "stun1.l.google.com:19302",
@@ -830,10 +892,10 @@ module.exports=[
   "stun.services.mozilla.com"
 ]
 
-},{}],7:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 module.exports=[]
 
-},{}],8:[function(require,module,exports){
+},{}],9:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -858,7 +920,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],9:[function(require,module,exports){
+},{}],10:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.2.0
  * @author yeikos
@@ -1034,68 +1096,6 @@ if (typeof Object.create === 'function') {
 	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],10:[function(require,module,exports){
-/**
-  # normalice
-
-  Normalize an ice server configuration object (or plain old string) into a format
-  that is usable in all browsers supporting WebRTC.  Primarily this module is designed
-  to help with the transition of the `url` attribute of the configuration object to
-  the `urls` attribute.
-
-  ## Example Usage
-
-  <<< examples/simple.js
-
-**/
-
-var protocols = [
-  'stun:',
-  'turn:'
-];
-
-module.exports = function(input) {
-  var url = (input || {}).url || input;
-  var protocol;
-  var parts;
-  var output = {};
-
-  // if we don't have a string url, then allow the input to passthrough
-  if (typeof url != 'string' && (! (url instanceof String))) {
-    return input;
-  }
-
-  // trim the url string, and convert to an array
-  url = url.trim();
-
-  // if the protocol is not known, then passthrough
-  protocol = protocols[protocols.indexOf(url.slice(0, 5))];
-  if (! protocol) {
-    return input;
-  }
-
-  // now let's attack the remaining url parts
-  url = url.slice(5);
-  parts = url.split('@');
-
-  output.username = input.username;
-  output.credential = input.credential;
-  // if we have an authentication part, then set the credentials
-  if (parts.length > 1) {
-    url = parts[1];
-    parts = parts[0].split(':');
-
-    // add the output credential and username
-    output.username = parts[0];
-    output.credential = (input || {}).credential || parts[1] || '';
-  }
-
-  output.url = protocol + url;
-  output.urls = [ output.url ];
-
-  return output;
-};
-
 },{}],11:[function(require,module,exports){
 /**
  * UAParser.js v0.7.9
