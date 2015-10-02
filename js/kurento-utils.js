@@ -7,7 +7,7 @@ var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 try {
     (function () {
-        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-build-project/lib\'');
+        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/Development/kurento_js_merge_project/lib\'');
     }());
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
@@ -20,16 +20,12 @@ try {
 var MEDIA_CONSTRAINTS = {
         audio: true,
         video: {
-            width: 640,
-            frameRate: 15,
-            advanced: [{
-                    width: { max: 640 },
-                    frameRate: {
-                        min: 10,
-                        ideal: 15,
-                        max: 30
-                    }
-                }]
+            width: { max: 640 },
+            frameRate: {
+                min: 10,
+                ideal: 15,
+                max: 30
+            }
         }
     };
 var ua = window && window.navigator ? window.navigator.userAgent : '';
