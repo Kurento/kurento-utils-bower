@@ -20,12 +20,8 @@ try {
 var MEDIA_CONSTRAINTS = {
         audio: true,
         video: {
-            width: { max: 640 },
-            frameRate: {
-                min: 10,
-                ideal: 15,
-                max: 30
-            }
+            width: 640,
+            framerate: 15
         }
     };
 var ua = window && window.navigator ? window.navigator.userAgent : '';
