@@ -7,7 +7,7 @@ var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 try {
     (function () {
-        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-build-project/lib\'');
+        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/Development/kurento_js_merge_project/lib\'');
     }());
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
@@ -30,6 +30,13 @@ function noop(error) {
     if (error)
         console.error(error);
 }
+function bindEvent(el, eventName, eventHandler) {
+    if (el.addEventListener) {
+        el.addEventListener(eventName, eventHandler, false);
+    } else if (el.attachEvent) {
+        el.attachEvent('on' + eventName, eventHandler);
+    }
+}
 function trackStop(track) {
     track.stop && track.stop();
 }
@@ -38,7 +45,7 @@ function streamStop(stream) {
 }
 function bufferizeCandidates(pc, onerror) {
     var candidatesQueue = [];
-    pc.addEventListener('signalingstatechange', function () {
+    bindEvent(pc, 'signalingstatechange', function () {
         if (this.signalingState === 'stable') {
             while (candidatesQueue.length) {
                 var entry = candidatesQueue.shift();
@@ -131,7 +138,7 @@ function WebRtcPeer(mode, options, callback) {
     var self = this;
     var candidatesQueueOut = [];
     var candidategatheringdone = false;
-    pc.addEventListener('icecandidate', function (event) {
+    bindEvent(pc, 'icecandidate', function (event) {
         var candidate = event.candidate;
         if (EventEmitter.listenerCount(self, 'icecandidate') || EventEmitter.listenerCount(self, 'candidategatheringdone')) {
             if (candidate) {
@@ -196,15 +203,11 @@ function WebRtcPeer(mode, options, callback) {
     function setRemoteVideo() {
         if (remoteVideo) {
             var stream = pc.getRemoteStreams()[0];
-            var url = stream ? URL.createObjectURL(stream) : '';
-            remoteVideo.pause();
-            remoteVideo.src = url;
-            remoteVideo.load();
-            console.log('Remote URL:', url);
+            attachMediaStream(remoteVideo, stream);
         }
     }
     this.showLocalVideo = function () {
-        localVideo.src = URL.createObjectURL(videoStream);
+        attachMediaStream(localVideo, videoStream);
         localVideo.muted = true;
     };
     this.processAnswer = function (sdpAnswer, callback) {
@@ -254,11 +257,11 @@ function WebRtcPeer(mode, options, callback) {
             self.showLocalVideo();
         }
         if (videoStream) {
-            videoStream.addEventListener('ended', streamEndedListener);
+            bindEvent(videoStream, 'ended', streamEndedListener);
             pc.addStream(videoStream);
         }
         if (audioStream) {
-            audioStream.addEventListener('ended', streamEndedListener);
+            bindEvent(audioStream, 'ended', streamEndedListener);
             pc.addStream(audioStream);
         }
         var browser = parser.getBrowser();
