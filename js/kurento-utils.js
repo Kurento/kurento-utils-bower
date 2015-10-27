@@ -363,11 +363,15 @@ WebRtcPeer.prototype.getRemoteStream = function (index) {
 WebRtcPeer.prototype.dispose = function () {
     console.log('Disposing WebRtcPeer');
     var pc = this.peerConnection;
-    if (pc) {
-        if (pc.signalingState === 'closed')
-            return;
-        pc.getLocalStreams().forEach(streamStop);
-        pc.close();
+    try {
+        if (pc) {
+            if (pc.signalingState === 'closed')
+                return;
+            pc.getLocalStreams().forEach(streamStop);
+            pc.close();
+        }
+    } catch (err) {
+        console.warn('Exception disposing webrtc peer ' + err);
     }
     this.emit('_dispose');
 };
