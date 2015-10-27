@@ -30,13 +30,6 @@ function noop(error) {
     if (error)
         console.error(error);
 }
-function bindEvent(el, eventName, eventHandler) {
-    if (el.addEventListener) {
-        el.addEventListener(eventName, eventHandler, false);
-    } else if (el.attachEvent) {
-        el.attachEvent('on' + eventName, eventHandler);
-    }
-}
 function trackStop(track) {
     track.stop && track.stop();
 }
@@ -45,7 +38,7 @@ function streamStop(stream) {
 }
 function bufferizeCandidates(pc, onerror) {
     var candidatesQueue = [];
-    bindEvent(pc, 'signalingstatechange', function () {
+    pc.addEventListener('signalingstatechange', function () {
         if (this.signalingState === 'stable') {
             while (candidatesQueue.length) {
                 var entry = candidatesQueue.shift();
@@ -138,7 +131,7 @@ function WebRtcPeer(mode, options, callback) {
     var self = this;
     var candidatesQueueOut = [];
     var candidategatheringdone = false;
-    bindEvent(pc, 'icecandidate', function (event) {
+    pc.addEventListener('icecandidate', function (event) {
         var candidate = event.candidate;
         if (EventEmitter.listenerCount(self, 'icecandidate') || EventEmitter.listenerCount(self, 'candidategatheringdone')) {
             if (candidate) {
@@ -203,11 +196,15 @@ function WebRtcPeer(mode, options, callback) {
     function setRemoteVideo() {
         if (remoteVideo) {
             var stream = pc.getRemoteStreams()[0];
-            attachMediaStream(remoteVideo, stream);
+            var url = stream ? URL.createObjectURL(stream) : '';
+            remoteVideo.pause();
+            remoteVideo.src = url;
+            remoteVideo.load();
+            console.log('Remote URL:', url);
         }
     }
     this.showLocalVideo = function () {
-        attachMediaStream(localVideo, videoStream);
+        localVideo.src = URL.createObjectURL(videoStream);
         localVideo.muted = true;
     };
     this.processAnswer = function (sdpAnswer, callback) {
@@ -257,11 +254,11 @@ function WebRtcPeer(mode, options, callback) {
             self.showLocalVideo();
         }
         if (videoStream) {
-            bindEvent(videoStream, 'ended', streamEndedListener);
+            videoStream.addEventListener('ended', streamEndedListener);
             pc.addStream(videoStream);
         }
         if (audioStream) {
-            bindEvent(audioStream, 'ended', streamEndedListener);
+            audioStream.addEventListener('ended', streamEndedListener);
             pc.addStream(audioStream);
         }
         var browser = parser.getBrowser();
