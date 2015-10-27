@@ -7,7 +7,7 @@ var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 try {
     (function () {
-        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-build-project/lib\'');
+        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/Development/kurento_js_merge_project/lib\'');
     }());
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
@@ -366,15 +366,11 @@ WebRtcPeer.prototype.getRemoteStream = function (index) {
 WebRtcPeer.prototype.dispose = function () {
     console.log('Disposing WebRtcPeer');
     var pc = this.peerConnection;
-    try {
-        if (pc) {
-            if (pc.signalingState === 'closed')
-                return;
-            pc.getLocalStreams().forEach(streamStop);
-            pc.close();
-        }
-    } catch (err) {
-        console.warn('Exception disposing webrtc peer ' + err);
+    if (pc) {
+        if (pc.signalingState === 'closed')
+            return;
+        pc.getLocalStreams().forEach(streamStop);
+        pc.close();
     }
     this.emit('_dispose');
 };
