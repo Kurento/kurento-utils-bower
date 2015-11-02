@@ -7,7 +7,7 @@ var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 try {
     (function () {
-        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-build-project/lib\'');
+        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/Development/kurento_js_merge_project/lib\'');
     }());
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
@@ -167,13 +167,19 @@ function WebRtcPeer(mode, options, callback) {
     this.generateOffer = function (callback) {
         callback = callback.bind(this);
         var browser = parser.getBrowser();
+        var offerAudio;
+        var offerVideo;
+        if (mediaConstraints) {
+            offerAudio = typeof mediaConstraints.audio === 'boolean' ? mediaConstraints.audio : true;
+            offerVideo = typeof mediaConstraints.video === 'boolean' ? mediaConstraints.video : true;
+        }
         var browserDependantConstraints = browser.name === 'Firefox' && browser.version > 34 ? {
-                offerToReceiveAudio: mode !== 'sendonly',
-                offerToReceiveVideo: mode !== 'sendonly'
+                offerToReceiveAudio: mode !== 'sendonly' && offerAudio,
+                offerToReceiveVideo: mode !== 'sendonly' && offerVideo
             } : {
                 mandatory: {
-                    OfferToReceiveAudio: mode !== 'sendonly',
-                    OfferToReceiveVideo: mode !== 'sendonly'
+                    OfferToReceiveAudio: mode !== 'sendonly' && offerAudio,
+                    OfferToReceiveVideo: mode !== 'sendonly' && offerVideo
                 },
                 optional: [{ DtlsSrtpKeyAgreement: true }]
             };
