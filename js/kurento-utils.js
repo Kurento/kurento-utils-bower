@@ -6,9 +6,7 @@ var uuid = require('uuid');
 var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 try {
-    (function () {
-        throw new Error('Cannot find module \'kurento-browser-extensions\' from \'/var/lib/jenkins/workspace/kurento-js-build-project/lib\'');
-    }());
+    require('kurento-browser-extensions');
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
         console.warn('screen sharing is not available');
@@ -65,6 +63,35 @@ function bufferizeCandidates(pc, onerror) {
         }
     };
 }
+function removeFIDFromOffer(sdp) {
+    var n = sdp.indexOf('a=ssrc-group:FID');
+    if (n > 0) {
+        return sdp.slice(0, n);
+    } else {
+        return sdp;
+    }
+}
+function getSimulcastInfo(videoStream) {
+    var videoTracks = videoStream.getVideoTracks();
+    var lines = [
+            'a=x-google-flag:conference',
+            'a=ssrc-group:SIM 1 2 3',
+            'a=ssrc:1 cname:localVideo',
+            'a=ssrc:1 msid:' + videoStream.id + ' ' + videoTracks[0].id,
+            'a=ssrc:1 mslabel:' + videoStream.id,
+            'a=ssrc:1 label:' + videoTracks[0].id,
+            'a=ssrc:2 cname:localVideo',
+            'a=ssrc:2 msid:' + videoStream.id + ' ' + videoTracks[0].id,
+            'a=ssrc:2 mslabel:' + videoStream.id,
+            'a=ssrc:2 label:' + videoTracks[0].id,
+            'a=ssrc:3 cname:localVideo',
+            'a=ssrc:3 msid:' + videoStream.id + ' ' + videoTracks[0].id,
+            'a=ssrc:3 mslabel:' + videoStream.id,
+            'a=ssrc:3 label:' + videoTracks[0].id
+        ];
+    lines.push('');
+    return lines.join('\n');
+}
 function WebRtcPeer(mode, options, callback) {
     if (!(this instanceof WebRtcPeer)) {
         return new WebRtcPeer(mode, options, callback);
@@ -96,6 +123,7 @@ function WebRtcPeer(mode, options, callback) {
     if (oncandidategatheringdone) {
         this.on('candidategatheringdone', oncandidategatheringdone);
     }
+    var simulcast = options.simulcast;
     if (!pc)
         pc = new RTCPeerConnection(configuration);
     Object.defineProperties(this, {
@@ -187,6 +215,17 @@ function WebRtcPeer(mode, options, callback) {
         console.log('constraints: ' + JSON.stringify(constraints));
         pc.createOffer(function (offer) {
             console.log('Created SDP offer');
+            if (simulcast) {
+                if (browser.name === 'Chrome' || browser.name === 'Chromium') {
+                    console.log('Adding multicast info');
+                    offer = new RTCSessionDescription({
+                        'type': offer.type,
+                        'sdp': removeFIDFromOffer(offer.sdp) + getSimulcastInfo(videoStream)
+                    });
+                } else {
+                    console.warn('Simulcast is only available in Chrome browser.');
+                }
+            }
             pc.setLocalDescription(offer, function () {
                 console.log('Local description set', offer.sdp);
                 callback(null, offer.sdp, self.processAnswer.bind(self));
@@ -406,7 +445,7 @@ exports.bufferizeCandidates = bufferizeCandidates;
 exports.WebRtcPeerRecvonly = WebRtcPeerRecvonly;
 exports.WebRtcPeerSendonly = WebRtcPeerSendonly;
 exports.WebRtcPeerSendrecv = WebRtcPeerSendrecv;
-},{"events":4,"freeice":5,"inherits":9,"merge":10,"ua-parser-js":11,"uuid":13}],2:[function(require,module,exports){
+},{"events":4,"freeice":5,"inherits":9,"kurento-browser-extensions":10,"merge":11,"ua-parser-js":12,"uuid":14}],2:[function(require,module,exports){
 if (window.addEventListener)
     module.exports = require('./index');
 },{"./index":3}],3:[function(require,module,exports){
@@ -931,6 +970,9 @@ if (typeof Object.create === 'function') {
 }
 
 },{}],10:[function(require,module,exports){
+// Does nothing at all.
+
+},{}],11:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.2.0
  * @author yeikos
@@ -1106,7 +1148,7 @@ if (typeof Object.create === 'function') {
 	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],11:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
 /**
  * UAParser.js v0.7.9
  * Lightweight JavaScript-based User-Agent string parser
@@ -1978,7 +2020,7 @@ if (typeof Object.create === 'function') {
 
 })(typeof window === 'object' ? window : this);
 
-},{}],12:[function(require,module,exports){
+},{}],13:[function(require,module,exports){
 (function (global){
 
 var rng;
@@ -2013,7 +2055,7 @@ module.exports = rng;
 
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],13:[function(require,module,exports){
+},{}],14:[function(require,module,exports){
 //     uuid.js
 //
 //     Copyright (c) 2010-2012 Robert Kieffer
@@ -2198,5 +2240,5 @@ uuid.unparse = unparse;
 
 module.exports = uuid;
 
-},{"./rng":12}]},{},[2])(2)
+},{"./rng":13}]},{},[2])(2)
 });
