@@ -18,8 +18,11 @@ try {
 var MEDIA_CONSTRAINTS = {
         audio: true,
         video: {
-            width: 640,
-            framerate: 15
+            mandatory: {
+                maxWidth: 640,
+                maxFrameRate: 15,
+                minFrameRate: 15
+            }
         }
     };
 var ua = window && window.navigator ? window.navigator.userAgent : '';
@@ -63,35 +66,6 @@ function bufferizeCandidates(pc, onerror) {
         }
     };
 }
-function removeFIDFromOffer(sdp) {
-    var n = sdp.indexOf('a=ssrc-group:FID');
-    if (n > 0) {
-        return sdp.slice(0, n);
-    } else {
-        return sdp;
-    }
-}
-function getSimulcastInfo(videoStream) {
-    var videoTracks = videoStream.getVideoTracks();
-    var lines = [
-            'a=x-google-flag:conference',
-            'a=ssrc-group:SIM 1 2 3',
-            'a=ssrc:1 cname:localVideo',
-            'a=ssrc:1 msid:' + videoStream.id + ' ' + videoTracks[0].id,
-            'a=ssrc:1 mslabel:' + videoStream.id,
-            'a=ssrc:1 label:' + videoTracks[0].id,
-            'a=ssrc:2 cname:localVideo',
-            'a=ssrc:2 msid:' + videoStream.id + ' ' + videoTracks[0].id,
-            'a=ssrc:2 mslabel:' + videoStream.id,
-            'a=ssrc:2 label:' + videoTracks[0].id,
-            'a=ssrc:3 cname:localVideo',
-            'a=ssrc:3 msid:' + videoStream.id + ' ' + videoTracks[0].id,
-            'a=ssrc:3 mslabel:' + videoStream.id,
-            'a=ssrc:3 label:' + videoTracks[0].id
-        ];
-    lines.push('');
-    return lines.join('\n');
-}
 function WebRtcPeer(mode, options, callback) {
     if (!(this instanceof WebRtcPeer)) {
         return new WebRtcPeer(mode, options, callback);
@@ -123,7 +97,6 @@ function WebRtcPeer(mode, options, callback) {
     if (oncandidategatheringdone) {
         this.on('candidategatheringdone', oncandidategatheringdone);
     }
-    var simulcast = options.simulcast;
     if (!pc)
         pc = new RTCPeerConnection(configuration);
     Object.defineProperties(this, {
@@ -195,19 +168,13 @@ function WebRtcPeer(mode, options, callback) {
     this.generateOffer = function (callback) {
         callback = callback.bind(this);
         var browser = parser.getBrowser();
-        var offerAudio = true;
-        var offerVideo = true;
-        if (mediaConstraints) {
-            offerAudio = typeof mediaConstraints.audio === 'boolean' ? mediaConstraints.audio : true;
-            offerVideo = typeof mediaConstraints.video === 'boolean' ? mediaConstraints.video : true;
-        }
         var browserDependantConstraints = browser.name === 'Firefox' && browser.version > 34 ? {
-                offerToReceiveAudio: mode !== 'sendonly' && offerAudio,
-                offerToReceiveVideo: mode !== 'sendonly' && offerVideo
+                offerToReceiveAudio: mode !== 'sendonly',
+                offerToReceiveVideo: mode !== 'sendonly'
             } : {
                 mandatory: {
-                    OfferToReceiveAudio: mode !== 'sendonly' && offerAudio,
-                    OfferToReceiveVideo: mode !== 'sendonly' && offerVideo
+                    OfferToReceiveAudio: mode !== 'sendonly',
+                    OfferToReceiveVideo: mode !== 'sendonly'
                 },
                 optional: [{ DtlsSrtpKeyAgreement: true }]
             };
@@ -215,17 +182,6 @@ function WebRtcPeer(mode, options, callback) {
         console.log('constraints: ' + JSON.stringify(constraints));
         pc.createOffer(function (offer) {
             console.log('Created SDP offer');
-            if (simulcast) {
-                if (browser.name === 'Chrome' || browser.name === 'Chromium') {
-                    console.log('Adding multicast info');
-                    offer = new RTCSessionDescription({
-                        'type': offer.type,
-                        'sdp': removeFIDFromOffer(offer.sdp) + getSimulcastInfo(videoStream)
-                    });
-                } else {
-                    console.warn('Simulcast is only available in Chrome browser.');
-                }
-            }
             pc.setLocalDescription(offer, function () {
                 console.log('Local description set', offer.sdp);
                 callback(null, offer.sdp, self.processAnswer.bind(self));
@@ -314,10 +270,9 @@ function WebRtcPeer(mode, options, callback) {
     }
     if (mode !== 'recvonly' && !videoStream && !audioStream) {
         function getMedia(constraints) {
-            if (constraints === undefined) {
-                constraints = MEDIA_CONSTRAINTS;
-            }
-            getUserMedia(constraints, function (stream) {
+            constraints = Array.prototype.slice.call(arguments);
+            constraints.unshift(MEDIA_CONSTRAINTS);
+            getUserMedia(recursive.apply(undefined, constraints), function (stream) {
                 videoStream = stream;
                 start();
             }, callback);
@@ -325,12 +280,10 @@ function WebRtcPeer(mode, options, callback) {
         if (sendSource === 'webcam') {
             getMedia(mediaConstraints);
         } else {
-            getScreenConstraints(sendSource, function (error, constraints_) {
+            getScreenConstraints(sendSource, function (error, constraints) {
                 if (error)
                     return callback(error);
-                constraints = [mediaConstraints];
-                constraints.unshift(constraints_);
-                getMedia(recursive.apply(undefined, constraints));
+                getMedia(constraints, mediaConstraints);
             }, guid);
         }
     } else {
@@ -408,15 +361,11 @@ WebRtcPeer.prototype.getRemoteStream = function (index) {
 WebRtcPeer.prototype.dispose = function () {
     console.log('Disposing WebRtcPeer');
     var pc = this.peerConnection;
-    try {
-        if (pc) {
-            if (pc.signalingState === 'closed')
-                return;
-            pc.getLocalStreams().forEach(streamStop);
-            pc.close();
-        }
-    } catch (err) {
-        console.warn('Exception disposing webrtc peer ' + err);
+    if (pc) {
+        if (pc.signalingState === 'closed')
+            return;
+        pc.getLocalStreams().forEach(streamStop);
+        pc.close();
     }
     this.emit('_dispose');
 };
