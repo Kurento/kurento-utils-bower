@@ -1150,7 +1150,7 @@ if (typeof Object.create === 'function') {
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
 },{}],12:[function(require,module,exports){
 /**
- * UAParser.js v0.7.9
+ * UAParser.js v0.7.10
  * Lightweight JavaScript-based User-Agent string parser
  * https://github.com/faisalman/ua-parser-js
  *
@@ -1167,7 +1167,7 @@ if (typeof Object.create === 'function') {
     /////////////
 
 
-    var LIBVERSION  = '0.7.9',
+    var LIBVERSION  = '0.7.10',
         EMPTY       = '',
         UNKNOWN     = '?',
         FUNC_TYPE   = 'function',
@@ -1240,11 +1240,13 @@ if (typeof Object.create === 'function') {
                 if (typeof result === UNDEF_TYPE) {
                     result = {};
                     for (p in props) {
-                        q = props[p];
-                        if (typeof q === OBJ_TYPE) {
-                            result[q[0]] = undefined;
-                        } else {
-                            result[q] = undefined;
+                        if (props.hasOwnProperty(p)){
+                            q = props[p];
+                            if (typeof q === OBJ_TYPE) {
+                                result[q[0]] = undefined;
+                            } else {
+                                result[q] = undefined;
+                            }
                         }
                     }
                 }
@@ -1400,8 +1402,8 @@ if (typeof Object.create === 'function') {
 
             // Webkit/KHTML based
             /(rekonq)\/([\w\.]+)*/i,                                            // Rekonq
-            /(chromium|flock|rockmelt|midori|epiphany|silk|skyfire|ovibrowser|bolt|iron|vivaldi|iridium)\/([\w\.-]+)/i
-                                                                                // Chromium/Flock/RockMelt/Midori/Epiphany/Silk/Skyfire/Bolt/Iron/Iridium
+            /(chromium|flock|rockmelt|midori|epiphany|silk|skyfire|ovibrowser|bolt|iron|vivaldi|iridium|phantomjs)\/([\w\.-]+)/i
+                                                                                // Chromium/Flock/RockMelt/Midori/Epiphany/Silk/Skyfire/Bolt/Iron/Iridium/PhantomJS
             ], [NAME, VERSION], [
 
             /(trident).+rv[:\s]([\w\.]+).+like\sgecko/i                         // IE11
@@ -1418,9 +1420,15 @@ if (typeof Object.create === 'function') {
 
             /(chrome|omniweb|arora|[tizenoka]{5}\s?browser)\/v?([\w\.]+)/i,
                                                                                 // Chrome/OmniWeb/Arora/Tizen/Nokia
-            /(uc\s?browser|qqbrowser)[\/\s]?([\w\.]+)/i
-                                                                                // UCBrowser/QQBrowser
+            /(qqbrowser)[\/\s]?([\w\.]+)/i
+                                                                                // QQBrowser
             ], [NAME, VERSION], [
+
+            /(uc\s?browser)[\/\s]?([\w\.]+)/i,
+            /ucweb.+(ucbrowser)[\/\s]?([\w\.]+)/i,
+            /JUC.+(ucweb)[\/\s]?([\w\.]+)/i
+                                                                                // UCBrowser
+            ], [[NAME, 'UCBrowser'], VERSION], [
 
             /(dolfin)\/([\w\.]+)/i                                              // Dolphin
             ], [[NAME, 'Dolphin'], VERSION], [
@@ -1436,6 +1444,9 @@ if (typeof Object.create === 'function') {
 
             /FBAV\/([\w\.]+);/i                                                 // Facebook App for iOS
             ], [VERSION, [NAME, 'Facebook']], [
+
+            /fxios\/([\w\.-]+)/i                                                // Firefox for iOS
+            ], [VERSION, [NAME, 'Firefox']], [
 
             /version\/([\w\.]+).+?mobile\/\w+\s(safari)/i                       // Mobile Safari
             ], [VERSION, [NAME, 'Mobile Safari']], [
@@ -1453,8 +1464,6 @@ if (typeof Object.create === 'function') {
             // Gecko based
             /(navigator|netscape)\/([\w\.-]+)/i                                 // Netscape
             ], [[NAME, 'Netscape'], VERSION], [
-            /fxios\/([\w\.-]+)/i                                                // Firefox for iOS
-            ], [VERSION, [NAME, 'Firefox']], [
             /(swiftfox)/i,                                                      // Swiftfox
             /(icedragon|iceweasel|camino|chimera|fennec|maemo\sbrowser|minimo|conkeror)[\/\s]?([\w\.\+]+)/i,
                                                                                 // IceDragon/Iceweasel/Camino/Chimera/Fennec/Maemo/Minimo/Conkeror
@@ -1463,8 +1472,8 @@ if (typeof Object.create === 'function') {
             /(mozilla)\/([\w\.]+).+rv\:.+gecko\/\d+/i,                          // Mozilla
 
             // Other
-            /(polaris|lynx|dillo|icab|doris|amaya|w3m|netsurf)[\/\s]?([\w\.]+)/i,
-                                                                                // Polaris/Lynx/Dillo/iCab/Doris/Amaya/w3m/NetSurf
+            /(polaris|lynx|dillo|icab|doris|amaya|w3m|netsurf|sleipnir)[\/\s]?([\w\.]+)/i,
+                                                                                // Polaris/Lynx/Dillo/iCab/Doris/Amaya/w3m/NetSurf/Sleipnir
             /(links)\s\(([\w\.]+)/i,                                            // Links
             /(gobrowser)\/?([\w\.]+)*/i,                                        // GoBrowser
             /(ice\s?browser)\/v?([\w\._]+)/i,                                   // ICE Browser
@@ -1662,7 +1671,7 @@ if (typeof Object.create === 'function') {
             /android.+;\s(shield)\sbuild/i                                      // Nvidia
             ], [MODEL, [VENDOR, 'Nvidia'], [TYPE, CONSOLE]], [
 
-            /(playstation\s[3portablevi]+)/i                                    // Playstation
+            /(playstation\s[34portablevi]+)/i                                   // Playstation
             ], [MODEL, [VENDOR, 'Sony'], [TYPE, CONSOLE]], [
 
             /(sprint\s(\w+))/i                                                  // Sprint Phones
@@ -1688,7 +1697,8 @@ if (typeof Object.create === 'function') {
                                                                                 // Motorola
             /\s(milestone|droid(?:[2-4x]|\s(?:bionic|x2|pro|razr))?(:?\s4g)?)[\w\s]+build\//i,
             /mot[\s-]?(\w+)*/i,
-            /(XT\d{3,4}) build\//i
+            /(XT\d{3,4}) build\//i,
+            /(nexus\s[6])/i
             ], [MODEL, [VENDOR, 'Motorola'], [TYPE, MOBILE]], [
             /android.+\s(mz60\d|xoom[\s2]{0,2})\sbuild\//i
             ], [MODEL, [VENDOR, 'Motorola'], [TYPE, TABLET]], [
@@ -1740,7 +1750,8 @@ if (typeof Object.create === 'function') {
             /android.+(mi[\s\-_]*(?:one|one[\s_]plus)?[\s_]*(?:\d\w)?)\s+build/i    // Xiaomi Mi
             ], [[MODEL, /_/g, ' '], [VENDOR, 'Xiaomi'], [TYPE, MOBILE]], [
 
-            /(mobile|tablet);.+rv\:.+gecko\//i                                  // Unidentifiable
+            /\s(tablet)[;\/\s]/i,                                               // Unidentifiable Tablet
+            /\s(mobile)[;\/\s]/i                                                // Unidentifiable Mobile
             ], [[TYPE, util.lowerize], VENDOR, MODEL]
 
             /*//////////////////////////
@@ -1849,12 +1860,12 @@ if (typeof Object.create === 'function') {
             ], [[NAME, 'Firefox OS'], VERSION], [
 
             // Console
-            /(nintendo|playstation)\s([wids3portablevu]+)/i,                    // Nintendo/Playstation
+            /(nintendo|playstation)\s([wids34portablevu]+)/i,                   // Nintendo/Playstation
 
             // GNU/Linux based
             /(mint)[\/\s\(]?(\w+)*/i,                                           // Mint
             /(mageia|vectorlinux)[;\s]/i,                                       // Mageia/VectorLinux
-            /(joli|[kxln]?ubuntu|debian|[open]*suse|gentoo|arch|slackware|fedora|mandriva|centos|pclinuxos|redhat|zenwalk|linpus)[\/\s-]?([\w\.-]+)*/i,
+            /(joli|[kxln]?ubuntu|debian|[open]*suse|gentoo|(?=\s)arch|slackware|fedora|mandriva|centos|pclinuxos|redhat|zenwalk|linpus)[\/\s-]?([\w\.-]+)*/i,
                                                                                 // Joli/Ubuntu/Debian/SUSE/Gentoo/Arch/Slackware
                                                                                 // Fedora/Mandriva/CentOS/PCLinuxOS/RedHat/Zenwalk/Linpus
             /(hurd|linux)\s?([\w\.]+)*/i,                                       // Hurd/Linux
@@ -1872,7 +1883,7 @@ if (typeof Object.create === 'function') {
             /\s([frentopc-]{0,4}bsd|dragonfly)\s?([\w\.]+)*/i                   // FreeBSD/NetBSD/OpenBSD/PC-BSD/DragonFly
             ], [NAME, VERSION],[
 
-            /(ip[honead]+)(?:.*os\s*([\w]+)*\slike\smac|;\sopera)/i             // iOS
+            /(ip[honead]+)(?:.*os\s([\w]+)*\slike\smac|;\sopera)/i              // iOS
             ], [[NAME, 'iOS'], [VERSION, /_/g, '.']], [
 
             /(mac\sos\sx)\s?([\w\s\.]+\w)*/i,
