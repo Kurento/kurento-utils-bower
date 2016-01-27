@@ -123,6 +123,7 @@ function WebRtcPeer(mode, options, callback) {
     if (oncandidategatheringdone) {
         this.on('candidategatheringdone', oncandidategatheringdone);
     }
+    var browser = parser.getBrowser();
     var simulcast = options.simulcast;
     if (!pc)
         pc = new RTCPeerConnection(configuration);
@@ -175,6 +176,8 @@ function WebRtcPeer(mode, options, callback) {
                 candidategatheringdone = true;
         }
     });
+    pc.onaddstream = options.onaddstream;
+    pc.onnegotiationneeded = options.onnegotiationneeded;
     this.on('newListener', function (event, listener) {
         if (event === 'icecandidate' || event === 'candidategatheringdone') {
             while (candidatesQueueOut.length) {
@@ -194,7 +197,6 @@ function WebRtcPeer(mode, options, callback) {
     };
     this.generateOffer = function (callback) {
         callback = callback.bind(this);
-        var browser = parser.getBrowser();
         var offerAudio = true;
         var offerVideo = true;
         if (mediaConstraints) {
@@ -215,17 +217,7 @@ function WebRtcPeer(mode, options, callback) {
         console.log('constraints: ' + JSON.stringify(constraints));
         pc.createOffer(function (offer) {
             console.log('Created SDP offer');
-            if (simulcast) {
-                if (browser.name === 'Chrome' || browser.name === 'Chromium') {
-                    console.log('Adding multicast info');
-                    offer = new RTCSessionDescription({
-                        'type': offer.type,
-                        'sdp': removeFIDFromOffer(offer.sdp) + getSimulcastInfo(videoStream)
-                    });
-                } else {
-                    console.warn('Simulcast is only available in Chrome browser.');
-                }
-            }
+            offer = mangleSdpToAddSimulcast(offer);
             pc.setLocalDescription(offer, function () {
                 console.log('Local description set', offer.sdp);
                 callback(null, offer.sdp, self.processAnswer.bind(self));
@@ -280,6 +272,7 @@ function WebRtcPeer(mode, options, callback) {
         pc.setRemoteDescription(offer, function () {
             setRemoteVideo();
             pc.createAnswer(function (answer) {
+                answer = mangleSdpToAddSimulcast(answer);
                 console.log('Created SDP answer');
                 pc.setLocalDescription(answer, function () {
                     console.log('Local description set', answer.sdp);
@@ -288,6 +281,20 @@ function WebRtcPeer(mode, options, callback) {
             }, callback);
         }, callback);
     };
+    function mangleSdpToAddSimulcast(answer) {
+        if (simulcast) {
+            if (browser.name === 'Chrome' || browser.name === 'Chromium') {
+                console.log('Adding multicast info');
+                answer = new RTCSessionDescription({
+                    'type': answer.type,
+                    'sdp': removeFIDFromOffer(answer.sdp) + getSimulcastInfo(videoStream)
+                });
+            } else {
+                console.warn('Simulcast is only available in Chrome browser.');
+            }
+        }
+        return answer;
+    }
     function streamEndedListener() {
         self.emit('streamended', this);
     }
