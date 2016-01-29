@@ -133,6 +133,10 @@ function WebRtcPeer(mode, options, callback) {
                 return pc;
             }
         },
+        'id': {
+            value: options.id || guid,
+            writable: false
+        },
         'remoteVideo': {
             get: function () {
                 return remoteVideo;
