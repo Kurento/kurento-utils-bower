@@ -403,6 +403,7 @@ function WebRtcPeer(mode, options, callback) {
             localVideo.pause();
             localVideo.src = '';
             localVideo.load();
+            localVideo.muted = false;
         }
         if (remoteVideo) {
             remoteVideo.pause();
