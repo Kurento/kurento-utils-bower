@@ -249,19 +249,19 @@ function WebRtcPeer(mode, options, callback) {
             };
         var constraints = recursive(browserDependantConstraints, connectionConstraints);
         console.log('constraints: ' + JSON.stringify(constraints));
-        pc.createOffer(function (offer) {
+        pc.createOffer(constraints).then(function (offer) {
             console.log('Created SDP offer');
             offer = mangleSdpToAddSimulcast(offer);
-            pc.setLocalDescription(offer, function () {
-                console.log('Local description set', offer.sdp);
-                if (multistream && usePlanB) {
-                    var unifiedPlanOffer = interop.toUnifiedPlan(offer);
-                    console.log('offer::origPlanB->UnifiedPlan', dumpSDP(unifiedPlanOffer));
-                    offer = unifiedPlanOffer;
-                }
-                callback(null, offer.sdp, self.processAnswer.bind(self));
-            }, callback);
-        }, callback, constraints);
+            return pc.setLocalDescription(offer);
+        }).then(function () {
+            var localDescription = pc.localDescription;
+            console.log('Local description set', localDescription.sdp);
+            if (multistream && usePlanB) {
+                localDescription = interop.toUnifiedPlan(localDescription);
+                console.log('offer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
+            }
+            callback(null, localDescription.sdp, self.processAnswer.bind(self));
+        }).catch(callback);
     };
     this.getLocalSessionDescriptor = function () {
         return pc.localDescription;
@@ -318,22 +318,23 @@ function WebRtcPeer(mode, options, callback) {
         if (pc.signalingState === 'closed') {
             return callback('PeerConnection is closed');
         }
-        pc.setRemoteDescription(offer, function () {
-            setRemoteVideo();
-            pc.createAnswer(function (answer) {
-                answer = mangleSdpToAddSimulcast(answer);
-                console.log('Created SDP answer');
-                pc.setLocalDescription(answer, function () {
-                    console.log('Local description set', answer.sdp);
-                    if (multistream && usePlanB) {
-                        var unifiedPlanAnswer = interop.toUnifiedPlan(answer);
-                        console.log('answer::origPlanB->UnifiedPlan', dumpSDP(unifiedPlanAnswer));
-                        answer = unifiedPlanAnswer;
-                    }
-                    callback(null, answer.sdp);
-                }, callback);
-            }, callback);
-        }, callback);
+        pc.setRemoteDescription(offer).then(function () {
+            return setRemoteVideo();
+        }).then(function () {
+            return pc.createAnswer();
+        }).then(function (answer) {
+            answer = mangleSdpToAddSimulcast(answer);
+            console.log('Created SDP answer');
+            return pc.setLocalDescription(answer);
+        }).then(function () {
+            var localDescription = pc.localDescription;
+            if (multistream && usePlanB) {
+                localDescription = interop.toUnifiedPlan(localDescription);
+                console.log('answer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
+            }
+            console.log('Local description set', localDescription.sdp);
+            callback(null, localDescription.sdp);
+        }).catch(callback);
     };
     function mangleSdpToAddSimulcast(answer) {
         if (simulcast) {
@@ -2355,13 +2356,6 @@ Interop.prototype.toUnifiedPlan = function(desc) {
         var ssrc2group = {};
         if (typeof ssrcGroups !== 'undefined' && Array.isArray(ssrcGroups)) {
             ssrcGroups.forEach(function (ssrcGroup) {
-
-                // TODO(gp) find out how to receive simulcast with FF. For the
-                // time being, hide it.
-                if (ssrcGroup.semantics === 'SIM') {
-                    return;
-                }
-
                 // XXX This might brake if an SSRC is in more than one group
                 // for some reason.
                 if (typeof ssrcGroup.ssrcs !== 'undefined' &&
