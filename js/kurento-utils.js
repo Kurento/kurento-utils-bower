@@ -121,6 +121,7 @@ function WebRtcPeer(mode, options, callback) {
     }
     options = options || {};
     callback = (callback || noop).bind(this);
+    var self = this;
     var localVideo = options.localVideo;
     var remoteVideo = options.remoteVideo;
     var videoStream = options.videoStream;
@@ -129,6 +130,9 @@ function WebRtcPeer(mode, options, callback) {
     var connectionConstraints = options.connectionConstraints;
     var pc = options.peerConnection;
     var sendSource = options.sendSource || 'webcam';
+    var dataChannelConfig = options.dataChannelConfig;
+    var useDataChannels = options.dataChannels || false;
+    var dataChannel;
     var guid = uuid.v4();
     var configuration = recursive({ iceServers: freeice() }, options.configuration);
     var onstreamended = options.onstreamended;
@@ -144,8 +148,8 @@ function WebRtcPeer(mode, options, callback) {
     var simulcast = options.simulcast;
     var multistream = options.multistream;
     var interop = new sdpTranslator.Interop();
-    if (!pc)
-        pc = new RTCPeerConnection(configuration);
+    var candidatesQueueOut = [];
+    var candidategatheringdone = false;
     Object.defineProperties(this, {
         'peerConnection': {
             get: function () {
@@ -166,6 +170,11 @@ function WebRtcPeer(mode, options, callback) {
                 return localVideo;
             }
         },
+        'dataChannel': {
+            get: function () {
+                return dataChannel;
+            }
+        },
         'currentFrame': {
             get: function () {
                 if (!remoteVideo)
@@ -180,9 +189,23 @@ function WebRtcPeer(mode, options, callback) {
             }
         }
     });
-    var self = this;
-    var candidatesQueueOut = [];
-    var candidategatheringdone = false;
+    if (!pc) {
+        pc = new RTCPeerConnection(configuration);
+        if (useDataChannels && !dataChannel) {
+            var dcId = 'WebRtcPeer-' + self.id;
+            var dcOptions = undefined;
+            if (dataChannelConfig) {
+                dcId = dataChannelConfig.id || dcId;
+                dcOptions - dataChannelConfig.options;
+            }
+            dataChannel = pc.createDataChannel(dcId, dcOptions);
+            if (dataChannelConfig) {
+                dataChannel.onopen = dataChannelConfig.onopen;
+                dataChannel.onclose = dataChannelConfig.onclose;
+                dataChannel.onmessage = dataChannelConfig.onmessage;
+            }
+        }
+    }
     pc.addEventListener('icecandidate', function (event) {
         var candidate = event.candidate;
         if (EventEmitter.listenerCount(self, 'icecandidate') || EventEmitter.listenerCount(self, 'candidategatheringdone')) {
@@ -282,6 +305,13 @@ function WebRtcPeer(mode, options, callback) {
     this.showLocalVideo = function () {
         localVideo.src = URL.createObjectURL(videoStream);
         localVideo.muted = true;
+    };
+    this.send = function (data) {
+        if (dataChannel && dataChannel.readyState === 'open') {
+            dataChannel.send(data);
+        } else {
+            console.warn('Trying to send data over a non-existing or closed data channel');
+        }
     };
     this.processAnswer = function (sdpAnswer, callback) {
         callback = (callback || noop).bind(this);
@@ -471,7 +501,13 @@ WebRtcPeer.prototype.getRemoteStream = function (index) {
 WebRtcPeer.prototype.dispose = function () {
     console.log('Disposing WebRtcPeer');
     var pc = this.peerConnection;
+    var dc = this.dataChannel;
     try {
+        if (dc) {
+            if (dc.signalingState === 'closed')
+                return;
+            dc.close();
+        }
         if (pc) {
             if (pc.signalingState === 'closed')
                 return;
