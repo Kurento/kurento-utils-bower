@@ -2205,6 +2205,19 @@ Interop.prototype.toPlanB = function(desc) {
     //#endregion
 };
 
+/* follow rules defined in RFC4145 */
+function addSetupAttr(uLine) {
+    if (typeof uLine.setup === 'undefined') {
+        return;
+    }
+
+    if (uLine.setup === "active") {
+            uLine.setup = "passive";
+    } else if (uLine.setup === "passive") {
+        uLine.setup = "active";
+    }
+}
+
 /**
  * This method transforms a Plan B SDP to an equivalent Unified Plan SDP. A
  * PeerConnection wrapper transforms the SDP to Unified Plan before passing it
@@ -2340,15 +2353,13 @@ Interop.prototype.toUnifiedPlan = function(desc) {
         var ssrcGroups = bLine.ssrcGroups;
         var port = bLine.port;
 
-        if ((typeof candidates != 'undefined') && (typeof bLine.candidates != 'undefined') && (candidates != bLine.candidates)) {
-            throw new Error("Only BUNDLE supported, candidates must be the same for all m-lines.\n" +
-                            "\tLast candidates: " + JSON.stringify(candidates) + "\n" +
-                            "\tNew candidates: " + JSON.stringify(bLine.candidates)
-            );
-        }
-
-        if (bLine.candidates != 'undefined') {
+        /* Chrome adds different candidates even using bundle, so we concat the candidates list */
+        if (typeof bLine.candidates != 'undefined') {
+            if (typeof candidates != 'undefined') {
+                candidates = candidates.concat(bLine.candidates);
+            } else {
                 candidates = bLine.candidates;
+            }
         }
 
         if ((typeof iceUfrag != 'undefined') && (typeof bLine.iceUfrag != 'undefined') && (iceUfrag != bLine.iceUfrag)) {
@@ -2358,7 +2369,7 @@ Interop.prototype.toUnifiedPlan = function(desc) {
             );
         }
 
-        if (bLine.iceUfrag != 'undefined') {
+        if (typeof bLine.iceUfrag != 'undefined') {
                 iceUfrag = bLine.iceUfrag;
         }
 
@@ -2369,7 +2380,7 @@ Interop.prototype.toUnifiedPlan = function(desc) {
             );
         }
 
-        if (bLine.icePwd != 'undefined') {
+        if (typeof bLine.icePwd != 'undefined') {
                 icePwd = bLine.icePwd;
         }
 
@@ -2381,7 +2392,7 @@ Interop.prototype.toUnifiedPlan = function(desc) {
             );
         }
 
-        if (bLine.fingerprint != 'undefined') {
+        if (typeof bLine.fingerprint != 'undefined') {
                 fingerprint = bLine.fingerprint;
         }
 
@@ -2656,12 +2667,17 @@ Interop.prototype.toUnifiedPlan = function(desc) {
                     delete uLine.msid;
                     delete uLine.sources;
                     delete uLine.ssrcGroups;
+
                     if (!uLine.direction
-                        || uLine.direction === 'sendrecv')
-                        uLine.direction = 'recvonly';
+                        || uLine.direction === 'sendrecv') {
+                        uLine.direction = 'sendonly';
+                    }
                     if (!uLine.direction
-                        || uLine.direction === 'sendonly')
+                        || uLine.direction === 'recvonly') {
                         uLine.direction = 'inactive';
+                    }
+
+                    addSetupAttr (uLine);
                     session.media.push(uLine);
                 }
             });
