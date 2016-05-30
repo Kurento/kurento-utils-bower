@@ -638,18 +638,11 @@ EventEmitter.prototype.emit = function(type) {
         break;
       // slower
       default:
-        len = arguments.length;
-        args = new Array(len - 1);
-        for (i = 1; i < len; i++)
-          args[i - 1] = arguments[i];
+        args = Array.prototype.slice.call(arguments, 1);
         handler.apply(this, args);
     }
   } else if (isObject(handler)) {
-    len = arguments.length;
-    args = new Array(len - 1);
-    for (i = 1; i < len; i++)
-      args[i - 1] = arguments[i];
-
+    args = Array.prototype.slice.call(arguments, 1);
     listeners = handler.slice();
     len = listeners.length;
     for (i = 0; i < len; i++)
@@ -687,7 +680,6 @@ EventEmitter.prototype.addListener = function(type, listener) {
 
   // Check for listener leak
   if (isObject(this._events[type]) && !this._events[type].warned) {
-    var m;
     if (!isUndefined(this._maxListeners)) {
       m = this._maxListeners;
     } else {
@@ -809,7 +801,7 @@ EventEmitter.prototype.removeAllListeners = function(type) {
 
   if (isFunction(listeners)) {
     this.removeListener(type, listeners);
-  } else {
+  } else if (listeners) {
     // LIFO order
     while (listeners.length)
       this.removeListener(type, listeners[listeners.length - 1]);
@@ -830,15 +822,20 @@ EventEmitter.prototype.listeners = function(type) {
   return ret;
 };
 
+EventEmitter.prototype.listenerCount = function(type) {
+  if (this._events) {
+    var evlistener = this._events[type];
+
+    if (isFunction(evlistener))
+      return 1;
+    else if (evlistener)
+      return evlistener.length;
+  }
+  return 0;
+};
+
 EventEmitter.listenerCount = function(emitter, type) {
-  var ret;
-  if (!emitter._events || !emitter._events[type])
-    ret = 0;
-  else if (isFunction(emitter._events[type]))
-    ret = 1;
-  else
-    ret = emitter._events[type].length;
-  return ret;
+  return emitter.listenerCount(type);
 };
 
 function isFunction(arg) {
@@ -2171,23 +2168,27 @@ Interop.prototype.toPlanB = function(desc) {
             // In Plan B the msid is an SSRC attribute.
             delete uLine.msid;
 
-            if (uLine.direction !== 'inactive') {
-              // Used to build the group:BUNDLE value after this loop.
-              types.push(uLine.type);
-            }
-
-            // Add the channel to the new media array.
-            session.media.push(uLine);
+	    if (uLine.type == "audio") {
+	      types.unshift(uLine.type);
+	      // Add the channel to the new media array.
+	      session.media.unshift(uLine);
+	    } else {
+	      types.push(uLine.type);
+	      // Add the channel to the new media array.
+	      session.media.push(uLine);
+	    }
         }
     });
 
-    // We regenerate the BUNDLE group with the new mids.
-    session.groups.some(function(group) {
-        if (group.type === 'BUNDLE') {
-            group.mids = types.join(' ');
-            return true;
-        }
-    });
+    if (typeof session.groups !== 'undefined') {
+      // We regenerate the BUNDLE group with the new mids.
+      session.groups.some(function(group) {
+	  if (group.type === 'BUNDLE') {
+	      group.mids = types.join(' ');
+	      return true;
+	  }
+      });
+    }
 
     // msid semantic
     session.msidSemantic = {
@@ -2269,7 +2270,7 @@ Interop.prototype.toUnifiedPlan = function(desc) {
         });
     }
 
-    if (!hasBundle) {
+    if (!hasBundle & session.media.length > 1) {
         throw new Error("Cannot convert to Unified Plan because m-lines that" +
             " are not bundled were found.");
     }
@@ -2762,13 +2763,15 @@ Interop.prototype.toUnifiedPlan = function(desc) {
         }
     });
 
-    // We regenerate the BUNDLE group (since we regenerated the mids)
-    session.groups.some(function(group) {
-        if (group.type === 'BUNDLE') {
-            group.mids = mids.join(' ');
-            return true;
-        }
-    });
+    if (typeof session.groups !== 'undefined') {
+      // We regenerate the BUNDLE group (since we regenerated the mids)
+      session.groups.some(function(group) {
+	  if (group.type === 'BUNDLE') {
+	      group.mids = mids.join(' ');
+	      return true;
+	  }
+      });
+    }
 
     // msid semantic
     session.msidSemantic = {
