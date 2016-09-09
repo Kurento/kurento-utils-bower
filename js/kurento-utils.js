@@ -135,9 +135,6 @@ function WebRtcPeer(mode, options, callback) {
     var dataChannel;
     var guid = uuid.v4();
     var configuration = recursive({ iceServers: freeice() }, options.configuration);
-    var onstreamended = options.onstreamended;
-    if (onstreamended)
-        this.on('streamended', onstreamended);
     var onicecandidate = options.onicecandidate;
     if (onicecandidate)
         this.on('icecandidate', onicecandidate);
@@ -196,13 +193,15 @@ function WebRtcPeer(mode, options, callback) {
             var dcOptions = undefined;
             if (dataChannelConfig) {
                 dcId = dataChannelConfig.id || dcId;
-                dcOptions - dataChannelConfig.options;
+                dcOptions = dataChannelConfig.options;
             }
             dataChannel = pc.createDataChannel(dcId, dcOptions);
             if (dataChannelConfig) {
                 dataChannel.onopen = dataChannelConfig.onopen;
                 dataChannel.onclose = dataChannelConfig.onclose;
                 dataChannel.onmessage = dataChannelConfig.onmessage;
+                dataChannel.onbufferedamountlow = dataChannelConfig.onbufferedamountlow;
+                dataChannel.onerror = dataChannelConfig.onerror || noop;
             }
         }
     }
@@ -380,9 +379,6 @@ function WebRtcPeer(mode, options, callback) {
         }
         return answer;
     }
-    function streamEndedListener() {
-        self.emit('streamended', this);
-    }
     function start() {
         if (pc.signalingState === 'closed') {
             callback('The peer connection object is in "closed" state. This is most likely due to an invocation of the dispose method before accepting in the dialogue');
@@ -391,11 +387,9 @@ function WebRtcPeer(mode, options, callback) {
             self.showLocalVideo();
         }
         if (videoStream) {
-            videoStream.addEventListener('ended', streamEndedListener);
             pc.addStream(videoStream);
         }
         if (audioStream) {
-            audioStream.addEventListener('ended', streamEndedListener);
             pc.addStream(audioStream);
         }
         var browser = parser.getBrowser();
@@ -614,8 +608,12 @@ EventEmitter.prototype.emit = function(type) {
       er = arguments[1];
       if (er instanceof Error) {
         throw er; // Unhandled 'error' event
+      } else {
+        // At least give some kind of context to the user
+        var err = new Error('Uncaught, unspecified "error" event. (' + er + ')');
+        err.context = er;
+        throw err;
       }
-      throw TypeError('Uncaught, unspecified "error" event.');
     }
   }
 
@@ -2108,6 +2106,19 @@ Interop.prototype.toPlanB = function(desc) {
             type2bl[uLine.type].direction === 'inactive') {
             type2bl[uLine.type] = uLine;
         }
+
+        if (uLine.protocol != type2bl[uLine.type].protocol) {
+          throw new Error('Cannot convert to Plan B because m-lines ' +
+              'have different protocols and this library does not have ' +
+              'support for that');
+        }
+
+        if (uLine.payloads != type2bl[uLine.type].payloads) {
+          throw new Error('Cannot convert to Plan B because m-lines ' +
+              'have different payloads and this library does not have ' +
+              'support for that');
+        }
+
     });
 
     // Implode the Unified Plan m-lines/tracks into Plan B channels.
@@ -2168,7 +2179,7 @@ Interop.prototype.toPlanB = function(desc) {
             // In Plan B the msid is an SSRC attribute.
             delete uLine.msid;
 
-	    if (uLine.type == "audio") {
+	    if (uLine.type == media[0].type) {
 	      types.unshift(uLine.type);
 	      // Add the channel to the new media array.
 	      session.media.unshift(uLine);
@@ -2270,9 +2281,19 @@ Interop.prototype.toUnifiedPlan = function(desc) {
         });
     }
 
-    if (!hasBundle & session.media.length > 1) {
-        throw new Error("Cannot convert to Unified Plan because m-lines that" +
-            " are not bundled were found.");
+    if (!hasBundle) {
+        var mustBeBundle = false;
+
+        session.media.forEach(function(m) {
+            if (m.direction !== 'inactive') {
+                mustBeBundle = true;
+            }
+        });
+
+        if (mustBeBundle) {
+            throw new Error("Cannot convert to Unified Plan because m-lines that" +
+              " are not bundled were found.");
+        }
     }
 
     //#endregion
@@ -2598,47 +2619,33 @@ Interop.prototype.toUnifiedPlan = function(desc) {
         for (var i = 0; i < cached.media.length; i++) {
             var uLine = cached.media[i];
 
-            if (typeof mid2ul[uLine.mid] === 'undefined') {
+            delete uLine.msid;
+            delete uLine.sources;
+            delete uLine.ssrcGroups;
 
-                // The mid isn't in the reconstructed (unified) answer.
-                // This is either a (unified) m-line containing a remote
-                // track only, or a (unified) m-line containing a remote
-                // track and a local track that has been removed.
-                // In either case, it MUST exist in the cached
-                // (unified) answer.
-                //
-                // In case this is a removed local track, clean-up
-                // the (unified) m-line and make sure it's 'recvonly' or
-                // 'inactive'.
-
-                delete uLine.msid;
-                delete uLine.sources;
-                delete uLine.ssrcGroups;
-
-                if (typeof sources2ul[i] === 'undefined') {
-                  if (!uLine.direction
-                      || uLine.direction === 'sendrecv')
-                      uLine.direction = 'recvonly'; /* inmediate-FIXME: why? */
-                  else if (uLine.direction === 'sendonly')
-                      uLine.direction = 'inactive';
-                }
-
-                uLine.sources = sources2ul[i];
-                uLine.candidates = candidates;
-                uLine.iceUfrag = iceUfrag;
-                uLine.icePwd = icePwd;
-                uLine.fingerprint = fingerprint;
-
-                uLine.rtp = rtp[uLine.type];
-                uLine.payloads = payloads[uLine.type];
-                uLine.rtcpFb = rtcpFb[uLine.type];
+            if (typeof sources2ul[i] === 'undefined') {
+              if (!uLine.direction
+                  || uLine.direction === 'sendrecv')
+                  uLine.direction = 'recvonly';
+              else if (uLine.direction === 'sendonly')
+                  uLine.direction = 'inactive';
             } else {
-                // This is an (unified) m-line/channel that contains a local
-                // track (sendrecv or sendonly channel) or it's a unified
-                // recvonly m-line/channel. In either case, since we're
-                // going from PlanB -> Unified Plan this m-line MUST
-                // exist in the cached answer.
+              if (!uLine.direction
+                  || uLine.direction === 'sendrecv')
+                  uLine.direction = 'sendrecv';
+              else if (uLine.direction === 'recvonly')
+                  uLine.direction = 'sendonly';
             }
+
+            uLine.sources = sources2ul[i];
+            uLine.candidates = candidates;
+            uLine.iceUfrag = iceUfrag;
+            uLine.icePwd = icePwd;
+            uLine.fingerprint = fingerprint;
+
+            uLine.rtp = rtp[uLine.type];
+            uLine.payloads = payloads[uLine.type];
+            uLine.rtcpFb = rtcpFb[uLine.type];
 
             session.media.push(uLine);
 
