@@ -403,10 +403,10 @@ function WebRtcPeer(mode, options, callback) {
             if (constraints === undefined) {
                 constraints = MEDIA_CONSTRAINTS;
             }
-            getUserMedia(constraints, function (stream) {
+            navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
                 videoStream = stream;
                 start();
-            }, callback);
+            }).catch(callback);
         }
         if (sendSource === 'webcam') {
             getMedia(mediaConstraints);
