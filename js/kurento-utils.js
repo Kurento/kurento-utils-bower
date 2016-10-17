@@ -7,11 +7,12 @@ var hark = require('hark');
 var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 var sdpTranslator = require('sdp-translator');
+var logger = console;
 try {
     require('kurento-browser-extensions');
 } catch (error) {
     if (typeof getScreenConstraints === 'undefined') {
-        console.warn('screen sharing is not available');
+        logger.warn('screen sharing is not available');
         getScreenConstraints = function getScreenConstraints(sendSource, callback) {
             callback(new Error('This library is not enabled for screen sharing'));
         };
@@ -29,12 +30,12 @@ var parser = new UAParser(ua);
 var browser = parser.getBrowser();
 var usePlanB = false;
 if (browser.name === 'Chrome' || browser.name === 'Chromium') {
-    console.log(browser.name + ': using SDP PlanB');
+    logger.info(browser.name + ': using SDP PlanB');
     usePlanB = true;
 }
 function noop(error) {
     if (error)
-        console.error(error);
+        logger.error(error);
 }
 function trackStop(track) {
     track.stop && track.stop();
@@ -88,7 +89,7 @@ function removeFIDFromOffer(sdp) {
 function getSimulcastInfo(videoStream) {
     var videoTracks = videoStream.getVideoTracks();
     if (!videoTracks.length) {
-        console.warn('No video tracks available in the video stream');
+        logger.warn('No video tracks available in the video stream');
         return '';
     }
     var lines = [
@@ -247,7 +248,7 @@ function WebRtcPeer(mode, options, callback) {
         } else {
             candidate = new RTCIceCandidate(iceCandidate);
         }
-        console.log('ICE candidate received');
+        logger.info('ICE candidate received');
         callback = (callback || noop).bind(this);
         addIceCandidate(candidate, callback);
     };
@@ -270,17 +271,17 @@ function WebRtcPeer(mode, options, callback) {
                 optional: [{ DtlsSrtpKeyAgreement: true }]
             };
         var constraints = recursive(browserDependantConstraints, connectionConstraints);
-        console.log('constraints: ' + JSON.stringify(constraints));
+        logger.info('constraints: ' + JSON.stringify(constraints));
         pc.createOffer(constraints).then(function (offer) {
-            console.log('Created SDP offer');
+            logger.info('Created SDP offer');
             offer = mangleSdpToAddSimulcast(offer);
             return pc.setLocalDescription(offer);
         }).then(function () {
             var localDescription = pc.localDescription;
-            console.log('Local description set', localDescription.sdp);
+            logger.info('Local description set', localDescription.sdp);
             if (multistream && usePlanB) {
                 localDescription = interop.toUnifiedPlan(localDescription);
-                console.log('offer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
+                logger.info('offer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
             }
             callback(null, localDescription.sdp, self.processAnswer.bind(self));
         }).catch(callback);
@@ -298,7 +299,7 @@ function WebRtcPeer(mode, options, callback) {
             remoteVideo.pause();
             remoteVideo.src = url;
             remoteVideo.load();
-            console.log('Remote URL:', url);
+            logger.info('Remote URL:', url);
         }
     }
     this.showLocalVideo = function () {
@@ -309,7 +310,7 @@ function WebRtcPeer(mode, options, callback) {
         if (dataChannel && dataChannel.readyState === 'open') {
             dataChannel.send(data);
         } else {
-            console.warn('Trying to send data over a non-existing or closed data channel');
+            logger.warn('Trying to send data over a non-existing or closed data channel');
         }
     };
     this.processAnswer = function (sdpAnswer, callback) {
@@ -320,10 +321,10 @@ function WebRtcPeer(mode, options, callback) {
             });
         if (multistream && usePlanB) {
             var planBAnswer = interop.toPlanB(answer);
-            console.log('asnwer::planB', dumpSDP(planBAnswer));
+            logger.info('asnwer::planB', dumpSDP(planBAnswer));
             answer = planBAnswer;
         }
-        console.log('SDP answer received, setting remote description');
+        logger.info('SDP answer received, setting remote description');
         if (pc.signalingState === 'closed') {
             return callback('PeerConnection is closed');
         }
@@ -340,10 +341,10 @@ function WebRtcPeer(mode, options, callback) {
             });
         if (multistream && usePlanB) {
             var planBOffer = interop.toPlanB(offer);
-            console.log('offer::planB', dumpSDP(planBOffer));
+            logger.info('offer::planB', dumpSDP(planBOffer));
             offer = planBOffer;
         }
-        console.log('SDP offer received, setting remote description');
+        logger.info('SDP offer received, setting remote description');
         if (pc.signalingState === 'closed') {
             return callback('PeerConnection is closed');
         }
@@ -353,28 +354,28 @@ function WebRtcPeer(mode, options, callback) {
             return pc.createAnswer();
         }).then(function (answer) {
             answer = mangleSdpToAddSimulcast(answer);
-            console.log('Created SDP answer');
+            logger.info('Created SDP answer');
             return pc.setLocalDescription(answer);
         }).then(function () {
             var localDescription = pc.localDescription;
             if (multistream && usePlanB) {
                 localDescription = interop.toUnifiedPlan(localDescription);
-                console.log('answer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
+                logger.info('answer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
             }
-            console.log('Local description set', localDescription.sdp);
+            logger.info('Local description set', localDescription.sdp);
             callback(null, localDescription.sdp);
         }).catch(callback);
     };
     function mangleSdpToAddSimulcast(answer) {
         if (simulcast) {
             if (browser.name === 'Chrome' || browser.name === 'Chromium') {
-                console.log('Adding multicast info');
+                logger.info('Adding multicast info');
                 answer = new RTCSessionDescription({
                     'type': answer.type,
                     'sdp': removeFIDFromOffer(answer.sdp) + getSimulcastInfo(videoStream)
                 });
             } else {
-                console.warn('Simulcast is only available in Chrome browser.');
+                logger.warn('Simulcast is only available in Chrome browser.');
             }
         }
         return answer;
@@ -493,7 +494,7 @@ WebRtcPeer.prototype.getRemoteStream = function (index) {
     }
 };
 WebRtcPeer.prototype.dispose = function () {
-    console.log('Disposing WebRtcPeer');
+    logger.info('Disposing WebRtcPeer');
     var pc = this.peerConnection;
     var dc = this.dataChannel;
     try {
@@ -509,7 +510,7 @@ WebRtcPeer.prototype.dispose = function () {
             pc.close();
         }
     } catch (err) {
-        console.warn('Exception disposing webrtc peer ' + err);
+        logger.warn('Exception disposing webrtc peer ' + err);
     }
     this.emit('_dispose');
 };
