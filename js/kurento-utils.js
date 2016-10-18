@@ -7,7 +7,7 @@ var hark = require('hark');
 var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
 var sdpTranslator = require('sdp-translator');
-var logger = console;
+var logger = window.Logger || console;
 try {
     require('kurento-browser-extensions');
 } catch (error) {
