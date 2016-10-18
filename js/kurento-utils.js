@@ -248,7 +248,7 @@ function WebRtcPeer(mode, options, callback) {
         } else {
             candidate = new RTCIceCandidate(iceCandidate);
         }
-        logger.info('ICE candidate received');
+        logger.debug('Remote ICE candidate received', iceCandidate);
         callback = (callback || noop).bind(this);
         addIceCandidate(candidate, callback);
     };
