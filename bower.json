@@ -16,5 +16,6 @@
     "Kurento <info@kurento.org> (http://kurento.org)",
     "Ivan Gracia <izanmail@gmail.com>",
     "Jesus Leganes 'piranna' <piranna@gmail.com>"
-  ]
+  ],
+  "main": "js/kurento-utils.js"
 }
