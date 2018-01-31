@@ -55,7 +55,7 @@ function bufferizeCandidates(pc, onerror) {
         if (this.signalingState === 'stable') {
             while (candidatesQueue.length) {
                 var entry = candidatesQueue.shift();
-                this.addIceCandidate(entry.candidate, entry.callback, entry.callback);
+                pc.addIceCandidate(entry.candidate, entry.callback, entry.callback);
             }
         }
     });
@@ -228,7 +228,7 @@ function WebRtcPeer(mode, options, callback) {
                 candidategatheringdone = true;
         }
     });
-    pc.ontrack = options.onaddstream;
+    pc.onaddstream = options.onaddstream;
     pc.onnegotiationneeded = options.onnegotiationneeded;
     this.on('newListener', function (event, listener) {
         if (event === 'icecandidate' || event === 'candidategatheringdone') {
@@ -288,16 +288,15 @@ function WebRtcPeer(mode, options, callback) {
     };
     function setRemoteVideo() {
         if (remoteVideo) {
-            var stream = pc.getRemoteStreams()[0];
-            var url = stream ? URL.createObjectURL(stream) : '';
             remoteVideo.pause();
-            remoteVideo.src = url;
+            var stream = pc.getRemoteStreams()[0];
+            remoteVideo.srcObject = stream;
+            logger.debug('Remote stream:', stream);
             remoteVideo.load();
-            logger.debug('Remote URL:', url);
         }
     }
     this.showLocalVideo = function () {
-        localVideo.src = URL.createObjectURL(videoStream);
+        localVideo.srcObject = videoStream;
         localVideo.muted = true;
     };
     this.send = function (data) {
@@ -420,13 +419,13 @@ function WebRtcPeer(mode, options, callback) {
     this.on('_dispose', function () {
         if (localVideo) {
             localVideo.pause();
-            localVideo.src = '';
+            localVideo.srcObject = null;
             localVideo.load();
             localVideo.muted = false;
         }
         if (remoteVideo) {
             remoteVideo.pause();
-            remoteVideo.src = '';
+            remoteVideo.srcObject = null;
             remoteVideo.load();
         }
         self.removeAllListeners();
