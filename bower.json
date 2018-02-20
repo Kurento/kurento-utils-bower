@@ -1,20 +1,34 @@
 {
   "name": "kurento-utils",
   "description": "Kurento Utilities",
-  "license": "ALv2",
+  "license": "Apache-2.0",
   "keywords": [
-    "API",
-    "Kurento",
-    "WebRTC"
+    "kurento",
+    "webrtc",
+    "rtp",
+    "srtp",
+    "audio",
+    "video",
+    "videoconference",
+    "broadcast",
+    "mediaserver",
+    "recording",
+    "stream",
+    "streaming",
+    "mcu",
+    "sfu",
+    "h264",
+    "vp8",
+    "stun",
+    "turn"
   ],
-  "homepage": "http://www.kurento.org",
+  "homepage": "https://www.kurento.org",
   "repository": {
     "type": "git",
-    "url": "Kurento/kurento-utils-js"
+    "url": "github:Kurento/kurento-utils-js"
   },
   "authors": [
-    "Kurento <info@kurento.org> (http://kurento.org)",
-    "Ivan Gracia <izanmail@gmail.com>",
-    "Jesus Leganes 'piranna' <piranna@gmail.com>"
+    "Kurento <openvidu@gmail.com> (https://www.kurento.org)",
+    "Kurento Community <openvidu@gmail.com> (https://www.kurento.org)"
   ]
 }
