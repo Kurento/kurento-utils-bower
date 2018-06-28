@@ -4,31 +4,48 @@
   "license": "Apache-2.0",
   "keywords": [
     "kurento",
-    "webrtc",
-    "rtp",
-    "srtp",
+    "mcu",
+    "sfu",
+    "rpc",
+    "mediaserver",
+    "pipe",
     "audio",
     "video",
-    "videoconference",
-    "broadcast",
-    "mediaserver",
+    "media",
     "recording",
     "stream",
     "streaming",
-    "mcu",
-    "sfu",
-    "h264",
-    "vp8",
+    "videoconference",
+    "broadcast",
+    "multicast",
+    "client",
+    "server",
+    "browser",
+    "chrome",
+    "edge",
+    "firefox",
+    "safari",
+    "webrtc",
+    "datachannel",
+    "sdp",
+    "ice",
     "stun",
-    "turn"
+    "turn",
+    "h264",
+    "h.264",
+    "opus",
+    "vp8",
+    "rtp",
+    "srtp",
+    "rtsp"
   ],
   "homepage": "https://www.kurento.org",
   "repository": {
     "type": "git",
-    "url": "github:Kurento/kurento-utils-js"
+    "url": "https://github.com/Kurento/kurento-utils-js.git"
   },
   "authors": [
     "Kurento <openvidu@gmail.com> (https://www.kurento.org)",
-    "Kurento Community <openvidu@gmail.com> (https://www.kurento.org)"
+    "Kurento Community <kurento@googlegroups.com> (https://www.kurento.org)"
   ]
 }
