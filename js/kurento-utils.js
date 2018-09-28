@@ -912,7 +912,7 @@ var normalice = require('normalice');
 
 **/
 
-var freeice = module.exports = function(opts) {
+var freeice = function(opts) {
   // if a list of servers has been provided, then use it instead of defaults
   var servers = {
     stun: (opts || {}).stun || require('./stun.json'),
@@ -953,6 +953,7 @@ var freeice = module.exports = function(opts) {
   return selected;
 };
 
+module.exports = freeice;
 },{"./stun.json":6,"./turn.json":7,"normalice":12}],6:[function(require,module,exports){
 module.exports=[
   "stun.l.google.com:19302",
@@ -967,8 +968,7 @@ module.exports=[
   "stun.voiparound.com",
   "stun.voipbuster.com",
   "stun.voipstunt.com",
-  "stun.voxgratia.org",
-  "stun.services.mozilla.com"
+  "stun.voxgratia.org"
 ]
 
 },{}],7:[function(require,module,exports){
