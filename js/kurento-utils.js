@@ -1134,7 +1134,7 @@ if (typeof Object.create === 'function') {
 
 },{}],11:[function(require,module,exports){
 /*!
- * @name JavaScript/NodeJS Merge v1.2.0
+ * @name JavaScript/NodeJS Merge v1.2.1
  * @author yeikos
  * @repository https://github.com/yeikos/js.merge
 
@@ -1262,6 +1262,8 @@ if (typeof Object.create === 'function') {
 			if (type !== 'object') continue;
 
 			for (var key in item) {
+
+				if (key === '__proto__') continue;
 
 				var sitem = clone ? Public.clone(item[key]) : item[key];
 
@@ -2910,7 +2912,7 @@ exports.parse = function(sdp) {
 
 },{"sdp-transform":14}],21:[function(require,module,exports){
 /*!
- * UAParser.js v0.7.18
+ * UAParser.js v0.7.19
  * Lightweight JavaScript-based User-Agent string parser
  * https://github.com/faisalman/ua-parser-js
  *
@@ -2927,7 +2929,7 @@ exports.parse = function(sdp) {
     /////////////
 
 
-    var LIBVERSION  = '0.7.18',
+    var LIBVERSION  = '0.7.19',
         EMPTY       = '',
         UNKNOWN     = '?',
         FUNC_TYPE   = 'function',
@@ -3172,7 +3174,7 @@ exports.parse = function(sdp) {
             /(trident).+rv[:\s]([\w\.]+).+like\sgecko/i                         // IE11
             ], [[NAME, 'IE'], VERSION], [
 
-            /(edge|edgios|edgea)\/((\d+)?[\w\.]+)/i                             // Microsoft Edge
+            /(edge|edgios|edga)\/((\d+)?[\w\.]+)/i                              // Microsoft Edge
             ], [[NAME, 'Edge'], VERSION], [
 
             /(yabrowser)\/([\w\.]+)/i                                           // Yandex
@@ -3181,8 +3183,13 @@ exports.parse = function(sdp) {
             /(puffin)\/([\w\.]+)/i                                              // Puffin
             ], [[NAME, 'Puffin'], VERSION], [
 
-            /((?:[\s\/])uc?\s?browser|(?:juc.+)ucweb)[\/\s]?([\w\.]+)/i
-                                                                                // UCBrowser
+            /(focus)\/([\w\.]+)/i                                               // Firefox Focus
+            ], [[NAME, 'Firefox Focus'], VERSION], [
+
+            /(opt)\/([\w\.]+)/i                                                 // Opera Touch
+            ], [[NAME, 'Opera Touch'], VERSION], [
+
+            /((?:[\s\/])uc?\s?browser|(?:juc.+)ucweb)[\/\s]?([\w\.]+)/i         // UCBrowser
             ], [[NAME, 'UCBrowser'], VERSION], [
 
             /(comodo_dragon)\/([\w\.]+)/i                                       // Comodo Dragon
@@ -3190,6 +3197,9 @@ exports.parse = function(sdp) {
 
             /(micromessenger)\/([\w\.]+)/i                                      // WeChat
             ], [[NAME, 'WeChat'], VERSION], [
+
+            /(brave)\/([\w\.]+)/i                                              // Brave browser
+            ], [[NAME, 'Brave'], VERSION], [
 
             /(qqbrowserlite)\/([\w\.]+)/i                                       // QQBrowserLite
             ], [NAME, VERSION], [
@@ -3217,6 +3227,10 @@ exports.parse = function(sdp) {
 
             /;fbav\/([\w\.]+);/i                                                // Facebook App for iOS & Android
             ], [VERSION, [NAME, 'Facebook']], [
+
+            /safari\s(line)\/([\w\.]+)/i,                                       // Line App for iOS
+            /android.+(line)\/([\w\.]+)\/iab/i                                  // Line App for Android
+            ], [NAME, VERSION], [
 
             /headlesschrome(?:\/([\w\.]+)|\s)/i                                 // Chrome Headless
             ], [VERSION, [NAME, 'Chrome Headless']], [
@@ -3415,7 +3429,7 @@ exports.parse = function(sdp) {
             /(sun4\w)[;\)]/i                                                    // SPARC
             ], [[ARCHITECTURE, 'sparc']], [
 
-            /((?:avr32|ia64(?=;))|68k(?=\))|arm(?:64|(?=v\d+;))|(?=atmel\s)avr|(?:irix|mips|sparc)(?:64)?(?=;)|pa-risc)/i
+            /((?:avr32|ia64(?=;))|68k(?=\))|arm(?:64|(?=v\d+[;l]))|(?=atmel\s)avr|(?:irix|mips|sparc)(?:64)?(?=;)|pa-risc)/i
                                                                                 // IA64, 68K, ARM/64, AVR/32, IRIX/64, MIPS/64, SPARC/64, PA-RISC
             ], [[ARCHITECTURE, util.lowerize]]
         ],
@@ -3443,6 +3457,8 @@ exports.parse = function(sdp) {
             ], [MODEL, [VENDOR, 'Amazon'], [TYPE, TABLET]], [
             /(sd|kf)[0349hijorstuw]+\sbuild\/.+silk\//i                         // Fire Phone
             ], [[MODEL, mapper.str, maps.device.amazon.model], [VENDOR, 'Amazon'], [TYPE, MOBILE]], [
+            /android.+aft([bms])\sbuild/i                                       // Fire TV
+            ], [MODEL, [VENDOR, 'Amazon'], [TYPE, SMARTTV]], [
 
             /\((ip[honed|\s\w*]+);.+(apple)/i                                   // iPod/iPhone
             ], [MODEL, VENDOR, [TYPE, MOBILE]], [
@@ -3571,10 +3587,10 @@ exports.parse = function(sdp) {
             /android.+;\s(glass)\s\d/i                                          // Google Glass
             ], [MODEL, [VENDOR, 'Google'], [TYPE, WEARABLE]], [
 
-            /android.+;\s(pixel c)\s/i                                          // Google Pixel C
+            /android.+;\s(pixel c)[\s)]/i                                       // Google Pixel C
             ], [MODEL, [VENDOR, 'Google'], [TYPE, TABLET]], [
 
-            /android.+;\s(pixel xl|pixel)\s/i                                   // Google Pixel
+            /android.+;\s(pixel( [23])?( xl)?)\s/i                              // Google Pixel
             ], [MODEL, [VENDOR, 'Google'], [TYPE, MOBILE]], [
 
             /android.+;\s(\w+)\s+build\/hm\1/i,                                 // Xiaomi Hongmi 'numeric' models
@@ -3586,6 +3602,8 @@ exports.parse = function(sdp) {
             ],[[MODEL, /_/g, ' '], [VENDOR, 'Xiaomi'], [TYPE, TABLET]], [
             /android.+;\s(m[1-5]\snote)\sbuild/i                                // Meizu Tablet
             ], [MODEL, [VENDOR, 'Meizu'], [TYPE, TABLET]], [
+            /(mz)-([\w-]{2,})/i                                                 // Meizu Phone
+            ], [[VENDOR, 'Meizu'], MODEL, [TYPE, MOBILE]], [
 
             /android.+a000(1)\s+build/i,                                        // OnePlus
             /android.+oneplus\s(a\d{4})\s+build/i
@@ -3633,6 +3651,9 @@ exports.parse = function(sdp) {
 
             /android.+[;\/]\s*(LVTEL\-)?(V1[12])\s+build/i                     // LvTel Phones
             ], [[VENDOR, 'LvTel'], MODEL, [TYPE, MOBILE]], [
+
+            /android.+;\s(PH-1)\s/i
+            ], [MODEL, [VENDOR, 'Essential'], [TYPE, MOBILE]], [                // Essential PH-1
 
             /android.+[;\/]\s*(V(100MD|700NA|7011|917G).*\b)\s+build/i          // Envizen Tablets
             ], [MODEL, [VENDOR, 'Envizen'], [TYPE, TABLET]], [
@@ -3796,8 +3817,8 @@ exports.parse = function(sdp) {
             // Other
             /((?:open)?solaris)[\/\s-]?([\w\.]*)/i,                             // Solaris
             /(aix)\s((\d)(?=\.|\)|\s)[\w\.])*/i,                                // AIX
-            /(plan\s9|minix|beos|os\/2|amigaos|morphos|risc\sos|openvms)/i,
-                                                                                // Plan9/Minix/BeOS/OS2/AmigaOS/MorphOS/RISCOS/OpenVMS
+            /(plan\s9|minix|beos|os\/2|amigaos|morphos|risc\sos|openvms|fuchsia)/i,
+                                                                                // Plan9/Minix/BeOS/OS2/AmigaOS/MorphOS/RISCOS/OpenVMS/Fuchsia
             /(unix)\s?([\w\.]*)/i                                               // UNIX
             ], [NAME, VERSION]
         ]
@@ -3982,7 +4003,7 @@ exports.parse = function(sdp) {
     //   jQuery always exports to global scope, unless jQuery.noConflict(true) is used,
     //   and we should catch that.
     var $ = window && (window.jQuery || window.Zepto);
-    if (typeof $ !== UNDEF_TYPE) {
+    if (typeof $ !== UNDEF_TYPE && !$.ua) {
         var parser = new UAParser();
         $.ua = parser.getResult();
         $.ua.get = function () {
