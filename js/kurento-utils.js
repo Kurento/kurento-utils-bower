@@ -2,7 +2,7 @@
 var freeice = require('freeice');
 var inherits = require('inherits');
 var UAParser = require('ua-parser-js');
-var uuid = require('uuid');
+var uuidv4 = require('uuid/v4');
 var hark = require('hark');
 var EventEmitter = require('events').EventEmitter;
 var recursive = require('merge').recursive.bind(undefined, true);
@@ -28,6 +28,20 @@ var MEDIA_CONSTRAINTS = {
 var ua = window && window.navigator ? window.navigator.userAgent : '';
 var parser = new UAParser(ua);
 var browser = parser.getBrowser();
+function insertScriptSrcInHtmlDom(scriptSrc) {
+    var script = document.createElement('script');
+    script.src = scriptSrc;
+    var ref = document.querySelector('script');
+    ref.parentNode.insertBefore(script, ref);
+}
+function importScriptsDependsOnBrowser() {
+    if (browser.name === 'IE') {
+        insertScriptSrcInHtmlDom('https://cdn.temasys.io/adapterjs/0.15.x/adapter.debug.js');
+    } else {
+        insertScriptSrcInHtmlDom('/webjars/webrtc-adapter/release/adapter.js');
+    }
+}
+importScriptsDependsOnBrowser();
 var usePlanB = false;
 if (browser.name === 'Chrome' || browser.name === 'Chromium') {
     logger.debug(browser.name + ': using SDP PlanB');
@@ -51,14 +65,22 @@ var dumpSDP = function (description) {
 };
 function bufferizeCandidates(pc, onerror) {
     var candidatesQueue = [];
-    pc.addEventListener('signalingstatechange', function () {
-        if (this.signalingState === 'stable') {
+    function setSignalingstatechangeAccordingWwebBrowser(functionToExecute, pc) {
+        if (typeof AdapterJS !== 'undefined' && AdapterJS.webrtcDetectedBrowser === 'IE' && AdapterJS.webrtcDetectedVersion >= 9) {
+            pc.onsignalingstatechange = functionToExecute;
+        } else {
+            pc.addEventListener('signalingstatechange', functionToExecute);
+        }
+    }
+    var signalingstatechangeFunction = function () {
+        if (pc.signalingState === 'stable') {
             while (candidatesQueue.length) {
                 var entry = candidatesQueue.shift();
                 pc.addIceCandidate(entry.candidate, entry.callback, entry.callback);
             }
         }
-    });
+    };
+    setSignalingstatechangeAccordingWwebBrowser(signalingstatechangeFunction, pc);
     return function (candidate, callback) {
         callback = callback || onerror;
         switch (pc.signalingState) {
@@ -111,6 +133,21 @@ function getSimulcastInfo(videoStream) {
     lines.push('');
     return lines.join('\n');
 }
+function sleep(milliseconds) {
+    var start = new Date().getTime();
+    for (var i = 0; i < 10000000; i++) {
+        if (new Date().getTime() - start > milliseconds) {
+            break;
+        }
+    }
+}
+function setIceCandidateAccordingWebBrowser(functionToExecute, pc) {
+    if (typeof AdapterJS !== 'undefined' && AdapterJS.webrtcDetectedBrowser === 'IE' && AdapterJS.webrtcDetectedVersion >= 9) {
+        pc.onicecandidate = functionToExecute;
+    } else {
+        pc.addEventListener('icecandidate', functionToExecute);
+    }
+}
 function WebRtcPeer(mode, options, callback) {
     if (!(this instanceof WebRtcPeer)) {
         return new WebRtcPeer(mode, options, callback);
@@ -134,7 +171,7 @@ function WebRtcPeer(mode, options, callback) {
     var dataChannelConfig = options.dataChannelConfig;
     var useDataChannels = options.dataChannels || false;
     var dataChannel;
-    var guid = uuid.v4();
+    var guid = uuidv4();
     var configuration = recursive({ iceServers: freeice() }, options.configuration);
     var onicecandidate = options.onicecandidate;
     if (onicecandidate)
@@ -206,7 +243,25 @@ function WebRtcPeer(mode, options, callback) {
             }
         }
     }
-    pc.addEventListener('icecandidate', function (event) {
+    if (!pc.getLocalStreams && pc.getSenders) {
+        pc.getLocalStreams = function () {
+            var stream = new MediaStream();
+            pc.getSenders().forEach(function (sender) {
+                stream.addTrack(sender.track);
+            });
+            return [stream];
+        };
+    }
+    if (!pc.getRemoteStreams && pc.getReceivers) {
+        pc.getRemoteStreams = function () {
+            var stream = new MediaStream();
+            pc.getReceivers().forEach(function (sender) {
+                stream.addTrack(sender.track);
+            });
+            return [stream];
+        };
+    }
+    var iceCandidateFunction = function (event) {
         var candidate = event.candidate;
         if (EventEmitter.listenerCount(self, 'icecandidate') || EventEmitter.listenerCount(self, 'candidategatheringdone')) {
             if (candidate) {
@@ -216,10 +271,16 @@ function WebRtcPeer(mode, options, callback) {
                 } else {
                     cand = candidate;
                 }
-                self.emit('icecandidate', cand);
+                if (typeof AdapterJS === 'undefined') {
+                    self.emit('icecandidate', cand);
+                }
                 candidategatheringdone = false;
             } else if (!candidategatheringdone) {
-                self.emit('candidategatheringdone');
+                if (typeof AdapterJS !== 'undefined' && AdapterJS.webrtcDetectedBrowser === 'IE' && AdapterJS.webrtcDetectedVersion >= 9) {
+                    EventEmitter.prototype.emit('candidategatheringdone', cand);
+                } else {
+                    self.emit('candidategatheringdone');
+                }
                 candidategatheringdone = true;
             }
         } else if (!candidategatheringdone) {
@@ -227,7 +288,8 @@ function WebRtcPeer(mode, options, callback) {
             if (!candidate)
                 candidategatheringdone = true;
         }
-    });
+    };
+    setIceCandidateAccordingWebBrowser(iceCandidateFunction, pc);
     pc.onaddstream = options.onaddstream;
     pc.onnegotiationneeded = options.onnegotiationneeded;
     this.on('newListener', function (event, listener) {
@@ -264,21 +326,46 @@ function WebRtcPeer(mode, options, callback) {
                 offerToReceiveAudio: mode !== 'sendonly' && offerAudio,
                 offerToReceiveVideo: mode !== 'sendonly' && offerVideo
             };
+        if (mode === 'recvonly' && pc.addTransceiver && browserDependantConstraints.offerToReceiveAudio) {
+            pc.addTransceiver('audio');
+        }
+        if (mode === 'recvonly' && pc.addTransceiver && browserDependantConstraints.offerToReceiveVideo) {
+            pc.addTransceiver('video');
+        }
         var constraints = browserDependantConstraints;
         logger.debug('constraints: ' + JSON.stringify(constraints));
-        pc.createOffer(constraints).then(function (offer) {
-            logger.debug('Created SDP offer');
-            offer = mangleSdpToAddSimulcast(offer);
-            return pc.setLocalDescription(offer);
-        }).then(function () {
-            var localDescription = pc.localDescription;
-            logger.debug('Local description set', localDescription.sdp);
-            if (multistream && usePlanB) {
-                localDescription = interop.toUnifiedPlan(localDescription);
-                logger.debug('offer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
-            }
-            callback(null, localDescription.sdp, self.processAnswer.bind(self));
-        }).catch(callback);
+        if (typeof AdapterJS !== 'undefined' && AdapterJS.webrtcDetectedBrowser === 'IE' && AdapterJS.webrtcDetectedVersion >= 9) {
+            var setLocalDescriptionOnSuccess = function () {
+                sleep(1000);
+                var localDescription = pc.localDescription;
+                logger.debug('Local description set', localDescription.sdp);
+                if (multistream && usePlanB) {
+                    localDescription = interop.toUnifiedPlan(localDescription);
+                    logger.debug('offer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
+                }
+                callback(null, localDescription.sdp, self.processAnswer.bind(self));
+            };
+            var createOfferOnSuccess = function (offer) {
+                logger.debug('Created SDP offer');
+                logger.debug('Local description set', pc.localDescription);
+                pc.setLocalDescription(offer, setLocalDescriptionOnSuccess, callback);
+            };
+            pc.createOffer(createOfferOnSuccess, callback, constraints);
+        } else {
+            pc.createOffer(constraints).then(function (offer) {
+                logger.debug('Created SDP offer');
+                offer = mangleSdpToAddSimulcast(offer);
+                return pc.setLocalDescription(offer);
+            }).then(function () {
+                var localDescription = pc.localDescription;
+                logger.debug('Local description set', localDescription.sdp);
+                if (multistream && usePlanB) {
+                    localDescription = interop.toUnifiedPlan(localDescription);
+                    logger.debug('offer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
+                }
+                callback(null, localDescription.sdp, self.processAnswer.bind(self));
+            }).catch(callback);
+        }
     };
     this.getLocalSessionDescriptor = function () {
         return pc.localDescription;
@@ -292,12 +379,19 @@ function WebRtcPeer(mode, options, callback) {
             var stream = pc.getRemoteStreams()[0];
             remoteVideo.srcObject = stream;
             logger.debug('Remote stream:', stream);
-            remoteVideo.load();
+            if (typeof AdapterJS !== 'undefined' && AdapterJS.webrtcDetectedBrowser === 'IE' && AdapterJS.webrtcDetectedVersion >= 9) {
+                remoteVideo = attachMediaStream(remoteVideo, stream);
+            } else {
+                remoteVideo.load();
+            }
         }
     }
     this.showLocalVideo = function () {
         localVideo.srcObject = videoStream;
         localVideo.muted = true;
+        if (typeof AdapterJS !== 'undefined' && AdapterJS.webrtcDetectedBrowser === 'IE' && AdapterJS.webrtcDetectedVersion >= 9) {
+            localVideo = attachMediaStream(localVideo, videoStream);
+        }
     };
     this.send = function (data) {
         if (dataChannel && dataChannel.readyState === 'open') {
@@ -381,10 +475,14 @@ function WebRtcPeer(mode, options, callback) {
             self.showLocalVideo();
         }
         if (videoStream) {
-            pc.addStream(videoStream);
+            videoStream.getTracks().forEach(function (track) {
+                pc.addTrack(track, videoStream);
+            });
         }
         if (audioStream) {
-            pc.addStream(audioStream);
+            audioStream.getTracks().forEach(function (track) {
+                pc.addTrack(track, audioStream);
+            });
         }
         var browser = parser.getBrowser();
         if (mode === 'sendonly' && (browser.name === 'Chrome' || browser.name === 'Chromium') && browser.major === 39) {
@@ -397,10 +495,17 @@ function WebRtcPeer(mode, options, callback) {
             if (constraints === undefined) {
                 constraints = MEDIA_CONSTRAINTS;
             }
-            navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
-                videoStream = stream;
-                start();
-            }).catch(callback);
+            if (typeof AdapterJS !== 'undefined' && AdapterJS.webrtcDetectedBrowser === 'IE' && AdapterJS.webrtcDetectedVersion >= 9) {
+                navigator.getUserMedia(constraints, function (stream) {
+                    videoStream = stream;
+                    start();
+                }, callback);
+            } else {
+                navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
+                    videoStream = stream;
+                    start();
+                }).catch(callback);
+            }
         }
         if (sendSource === 'webcam') {
             getMedia(mediaConstraints);
@@ -420,13 +525,17 @@ function WebRtcPeer(mode, options, callback) {
         if (localVideo) {
             localVideo.pause();
             localVideo.srcObject = null;
-            localVideo.load();
+            if (typeof AdapterJS === 'undefined') {
+                localVideo.load();
+            }
             localVideo.muted = false;
         }
         if (remoteVideo) {
             remoteVideo.pause();
             remoteVideo.srcObject = null;
-            remoteVideo.load();
+            if (typeof AdapterJS === 'undefined') {
+                remoteVideo.load();
+            }
         }
         self.removeAllListeners();
         if (window.cancelChooseDesktopMedia !== undefined) {
@@ -505,7 +614,9 @@ WebRtcPeer.prototype.dispose = function () {
     } catch (err) {
         logger.warn('Exception disposing webrtc peer ' + err);
     }
-    this.emit('_dispose');
+    if (typeof AdapterJS === 'undefined') {
+        this.emit('_dispose');
+    }
 };
 function WebRtcPeerRecvonly(options, callback) {
     if (!(this instanceof WebRtcPeerRecvonly)) {
@@ -536,7 +647,7 @@ exports.WebRtcPeerRecvonly = WebRtcPeerRecvonly;
 exports.WebRtcPeerSendonly = WebRtcPeerSendonly;
 exports.WebRtcPeerSendrecv = WebRtcPeerSendrecv;
 exports.hark = harkUtils;
-},{"events":4,"freeice":5,"hark":8,"inherits":9,"kurento-browser-extensions":10,"merge":11,"sdp-translator":18,"ua-parser-js":21,"uuid":23}],2:[function(require,module,exports){
+},{"events":4,"freeice":5,"hark":8,"inherits":9,"kurento-browser-extensions":10,"merge":11,"sdp-translator":18,"ua-parser-js":21,"uuid/v4":24}],2:[function(require,module,exports){
 if (window.addEventListener)
     module.exports = require('./index');
 },{"./index":3}],3:[function(require,module,exports){
@@ -991,12 +1102,14 @@ function getMaxVolume (analyser, fftBins) {
 }
 
 
-var audioContextType = window.AudioContext || window.webkitAudioContext;
+var audioContextType;
+if (typeof window !== 'undefined') {
+  audioContextType = window.AudioContext || window.webkitAudioContext;
+}
 // use a single audio context due to hardware limits
 var audioContext = null;
 module.exports = function(stream, options) {
   var harker = new WildEmitter();
-
 
   // make it not break in non-supported browsers
   if (!audioContextType) return harker;
@@ -1010,16 +1123,15 @@ module.exports = function(stream, options) {
       history = options.history || 10,
       running = true;
 
-  //Setup Audio Context
-  if (!audioContext) {
-    audioContext = new audioContextType();
-  }
+  // Ensure that just a single AudioContext is internally created
+  audioContext = options.audioContext || audioContext || new audioContextType();
+
   var sourceNode, fftBins, analyser;
 
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 512;
   analyser.smoothingTimeConstant = smoothing;
-  fftBins = new Float32Array(analyser.fftSize);
+  fftBins = new Float32Array(analyser.frequencyBinCount);
 
   if (stream.jquery) stream = stream[0];
   if (stream instanceof HTMLAudioElement || stream instanceof HTMLVideoElement) {
@@ -1038,6 +1150,19 @@ module.exports = function(stream, options) {
 
   harker.speaking = false;
 
+  harker.suspend = function() {
+    return audioContext.suspend();
+  }
+  harker.resume = function() {
+    return audioContext.resume();
+  }
+  Object.defineProperty(harker, 'state', { get: function() {
+    return audioContext.state;
+  }});
+  audioContext.onstatechange = function() {
+    harker.emit('state_change', audioContext.state);
+  }
+
   harker.setThreshold = function(t) {
     threshold = t;
   };
@@ -1045,7 +1170,7 @@ module.exports = function(stream, options) {
   harker.setInterval = function(i) {
     interval = i;
   };
-  
+
   harker.stop = function() {
     running = false;
     harker.emit('volume_change', -100, threshold);
@@ -1053,6 +1178,8 @@ module.exports = function(stream, options) {
       harker.speaking = false;
       harker.emit('stopped_speaking');
     }
+    analyser.disconnect();
+    sourceNode.disconnect();
   };
   harker.speakingHistory = [];
   for (var i = 0; i < history; i++) {
@@ -1063,12 +1190,12 @@ module.exports = function(stream, options) {
   // and emit events if changed
   var looper = function() {
     setTimeout(function() {
-    
+
       //check if stop has been called
       if(!running) {
         return;
       }
-      
+
       var currentVolume = getMaxVolume(analyser, fftBins);
 
       harker.emit('volume_change', currentVolume, threshold);
@@ -1100,32 +1227,35 @@ module.exports = function(stream, options) {
   };
   looper();
 
-
   return harker;
 }
 
-},{"wildemitter":24}],9:[function(require,module,exports){
+},{"wildemitter":25}],9:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor
-    ctor.prototype = Object.create(superCtor.prototype, {
-      constructor: {
-        value: ctor,
-        enumerable: false,
-        writable: true,
-        configurable: true
-      }
-    });
+    if (superCtor) {
+      ctor.super_ = superCtor
+      ctor.prototype = Object.create(superCtor.prototype, {
+        constructor: {
+          value: ctor,
+          enumerable: false,
+          writable: true,
+          configurable: true
+        }
+      })
+    }
   };
 } else {
   // old school shim for old browsers
   module.exports = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor
-    var TempCtor = function () {}
-    TempCtor.prototype = superCtor.prototype
-    ctor.prototype = new TempCtor()
-    ctor.prototype.constructor = ctor
+    if (superCtor) {
+      ctor.super_ = superCtor
+      var TempCtor = function () {}
+      TempCtor.prototype = superCtor.prototype
+      ctor.prototype = new TempCtor()
+      ctor.prototype.constructor = ctor
+    }
   }
 }
 
@@ -2912,12 +3042,12 @@ exports.parse = function(sdp) {
 
 },{"sdp-transform":14}],21:[function(require,module,exports){
 /*!
- * UAParser.js v0.7.19
+ * UAParser.js v0.7.20
  * Lightweight JavaScript-based User-Agent string parser
  * https://github.com/faisalman/ua-parser-js
  *
- * Copyright © 2012-2016 Faisal Salman <fyzlman@gmail.com>
- * Dual licensed under GPLv2 or MIT
+ * Copyright © 2012-2019 Faisal Salman <f@faisalman.com>
+ * Licensed under MIT License
  */
 
 (function (window, undefined) {
@@ -2929,7 +3059,7 @@ exports.parse = function(sdp) {
     /////////////
 
 
-    var LIBVERSION  = '0.7.19',
+    var LIBVERSION  = '0.7.20',
         EMPTY       = '',
         UNKNOWN     = '?',
         FUNC_TYPE   = 'function',
@@ -2958,15 +3088,15 @@ exports.parse = function(sdp) {
 
     var util = {
         extend : function (regexes, extensions) {
-            var margedRegexes = {};
+            var mergedRegexes = {};
             for (var i in regexes) {
                 if (extensions[i] && extensions[i].length % 2 === 0) {
-                    margedRegexes[i] = extensions[i].concat(regexes[i]);
+                    mergedRegexes[i] = extensions[i].concat(regexes[i]);
                 } else {
-                    margedRegexes[i] = regexes[i];
+                    mergedRegexes[i] = regexes[i];
                 }
             }
-            return margedRegexes;
+            return mergedRegexes;
         },
         has : function (str1, str2) {
           if (typeof str1 === "string") {
@@ -2996,14 +3126,7 @@ exports.parse = function(sdp) {
 
         rgx : function (ua, arrays) {
 
-            //var result = {},
-            var i = 0, j, k, p, q, matches, match;//, args = arguments;
-
-            /*// construct object barebones
-            for (p = 0; p < args[1].length; p++) {
-                q = args[1][p];
-                result[typeof q === OBJ_TYPE ? q[0] : q] = undefined;
-            }*/
+            var i = 0, j, k, p, q, matches, match;
 
             // loop through all regexes maps
             while (i < arrays.length && !matches) {
@@ -3051,8 +3174,6 @@ exports.parse = function(sdp) {
                 }
                 i += 2;
             }
-            // console.log(this);
-            //return this;
         },
 
         str : function (str, map) {
@@ -3167,14 +3288,17 @@ exports.parse = function(sdp) {
 
             // Webkit/KHTML based
             /(rekonq)\/([\w\.]*)/i,                                             // Rekonq
-            /(chromium|flock|rockmelt|midori|epiphany|silk|skyfire|ovibrowser|bolt|iron|vivaldi|iridium|phantomjs|bowser|quark)\/([\w\.-]+)/i
-                                                                                // Chromium/Flock/RockMelt/Midori/Epiphany/Silk/Skyfire/Bolt/Iron/Iridium/PhantomJS/Bowser
+            /(chromium|flock|rockmelt|midori|epiphany|silk|skyfire|ovibrowser|bolt|iron|vivaldi|iridium|phantomjs|bowser|quark|qupzilla|falkon)\/([\w\.-]+)/i
+                                                                                // Chromium/Flock/RockMelt/Midori/Epiphany/Silk/Skyfire/Bolt/Iron/Iridium/PhantomJS/Bowser/QupZilla/Falkon
             ], [NAME, VERSION], [
+
+            /(konqueror)\/([\w\.]+)/i                                           // Konqueror
+            ], [[NAME, 'Konqueror'], VERSION], [
 
             /(trident).+rv[:\s]([\w\.]+).+like\sgecko/i                         // IE11
             ], [[NAME, 'IE'], VERSION], [
 
-            /(edge|edgios|edga)\/((\d+)?[\w\.]+)/i                              // Microsoft Edge
+            /(edge|edgios|edga|edg)\/((\d+)?[\w\.]+)/i                          // Microsoft Edge
             ], [[NAME, 'Edge'], VERSION], [
 
             /(yabrowser)\/([\w\.]+)/i                                           // Yandex
@@ -3194,6 +3318,9 @@ exports.parse = function(sdp) {
 
             /(comodo_dragon)\/([\w\.]+)/i                                       // Comodo Dragon
             ], [[NAME, /_/g, ' '], VERSION], [
+
+            /(windowswechat qbcore)\/([\w\.]+)/i                                // WeChat Desktop for Windows Built-in Browser
+            ], [[NAME, 'WeChat(Win) Desktop'], VERSION], [
 
             /(micromessenger)\/([\w\.]+)/i                                      // WeChat
             ], [[NAME, 'WeChat'], VERSION], [
@@ -3244,6 +3371,9 @@ exports.parse = function(sdp) {
             /android.+version\/([\w\.]+)\s+(?:mobile\s?safari|safari)*/i        // Android Browser
             ], [VERSION, [NAME, 'Android Browser']], [
 
+            /(sailfishbrowser)\/([\w\.]+)/i                                     // Sailfish Browser
+            ], [[NAME, 'Sailfish Browser'], VERSION], [
+
             /(chrome|omniweb|arora|[tizenoka]{5}\s?browser)\/v?([\w\.]+)/i
                                                                                 // Chrome/OmniWeb/Arora/Tizen/Nokia
             ], [NAME, VERSION], [
@@ -3272,7 +3402,6 @@ exports.parse = function(sdp) {
             /webkit.+?(mobile\s?safari|safari)(\/[\w\.]+)/i                     // Safari < 3.0
             ], [NAME, [VERSION, mapper.str, maps.browser.oldsafari.version]], [
 
-            /(konqueror)\/([\w\.]+)/i,                                          // Konqueror
             /(webkit|khtml)\/([\w\.]+)/i
             ], [NAME, VERSION], [
 
@@ -3295,117 +3424,6 @@ exports.parse = function(sdp) {
             /(ice\s?browser)\/v?([\w\._]+)/i,                                   // ICE Browser
             /(mosaic)[\/\s]([\w\.]+)/i                                          // Mosaic
             ], [NAME, VERSION]
-
-            /* /////////////////////
-            // Media players BEGIN
-            ////////////////////////
-
-            , [
-
-            /(apple(?:coremedia|))\/((\d+)[\w\._]+)/i,                          // Generic Apple CoreMedia
-            /(coremedia) v((\d+)[\w\._]+)/i
-            ], [NAME, VERSION], [
-
-            /(aqualung|lyssna|bsplayer)\/((\d+)?[\w\.-]+)/i                     // Aqualung/Lyssna/BSPlayer
-            ], [NAME, VERSION], [
-
-            /(ares|ossproxy)\s((\d+)[\w\.-]+)/i                                 // Ares/OSSProxy
-            ], [NAME, VERSION], [
-
-            /(audacious|audimusicstream|amarok|bass|core|dalvik|gnomemplayer|music on console|nsplayer|psp-internetradioplayer|videos)\/((\d+)[\w\.-]+)/i,
-                                                                                // Audacious/AudiMusicStream/Amarok/BASS/OpenCORE/Dalvik/GnomeMplayer/MoC
-                                                                                // NSPlayer/PSP-InternetRadioPlayer/Videos
-            /(clementine|music player daemon)\s((\d+)[\w\.-]+)/i,               // Clementine/MPD
-            /(lg player|nexplayer)\s((\d+)[\d\.]+)/i,
-            /player\/(nexplayer|lg player)\s((\d+)[\w\.-]+)/i                   // NexPlayer/LG Player
-            ], [NAME, VERSION], [
-            /(nexplayer)\s((\d+)[\w\.-]+)/i                                     // Nexplayer
-            ], [NAME, VERSION], [
-
-            /(flrp)\/((\d+)[\w\.-]+)/i                                          // Flip Player
-            ], [[NAME, 'Flip Player'], VERSION], [
-
-            /(fstream|nativehost|queryseekspider|ia-archiver|facebookexternalhit)/i
-                                                                                // FStream/NativeHost/QuerySeekSpider/IA Archiver/facebookexternalhit
-            ], [NAME], [
-
-            /(gstreamer) souphttpsrc (?:\([^\)]+\)){0,1} libsoup\/((\d+)[\w\.-]+)/i
-                                                                                // Gstreamer
-            ], [NAME, VERSION], [
-
-            /(htc streaming player)\s[\w_]+\s\/\s((\d+)[\d\.]+)/i,              // HTC Streaming Player
-            /(java|python-urllib|python-requests|wget|libcurl)\/((\d+)[\w\.-_]+)/i,
-                                                                                // Java/urllib/requests/wget/cURL
-            /(lavf)((\d+)[\d\.]+)/i                                             // Lavf (FFMPEG)
-            ], [NAME, VERSION], [
-
-            /(htc_one_s)\/((\d+)[\d\.]+)/i                                      // HTC One S
-            ], [[NAME, /_/g, ' '], VERSION], [
-
-            /(mplayer)(?:\s|\/)(?:(?:sherpya-){0,1}svn)(?:-|\s)(r\d+(?:-\d+[\w\.-]+){0,1})/i
-                                                                                // MPlayer SVN
-            ], [NAME, VERSION], [
-
-            /(mplayer)(?:\s|\/|[unkow-]+)((\d+)[\w\.-]+)/i                      // MPlayer
-            ], [NAME, VERSION], [
-
-            /(mplayer)/i,                                                       // MPlayer (no other info)
-            /(yourmuze)/i,                                                      // YourMuze
-            /(media player classic|nero showtime)/i                             // Media Player Classic/Nero ShowTime
-            ], [NAME], [
-
-            /(nero (?:home|scout))\/((\d+)[\w\.-]+)/i                           // Nero Home/Nero Scout
-            ], [NAME, VERSION], [
-
-            /(nokia\d+)\/((\d+)[\w\.-]+)/i                                      // Nokia
-            ], [NAME, VERSION], [
-
-            /\s(songbird)\/((\d+)[\w\.-]+)/i                                    // Songbird/Philips-Songbird
-            ], [NAME, VERSION], [
-
-            /(winamp)3 version ((\d+)[\w\.-]+)/i,                               // Winamp
-            /(winamp)\s((\d+)[\w\.-]+)/i,
-            /(winamp)mpeg\/((\d+)[\w\.-]+)/i
-            ], [NAME, VERSION], [
-
-            /(ocms-bot|tapinradio|tunein radio|unknown|winamp|inlight radio)/i  // OCMS-bot/tap in radio/tunein/unknown/winamp (no other info)
-                                                                                // inlight radio
-            ], [NAME], [
-
-            /(quicktime|rma|radioapp|radioclientapplication|soundtap|totem|stagefright|streamium)\/((\d+)[\w\.-]+)/i
-                                                                                // QuickTime/RealMedia/RadioApp/RadioClientApplication/
-                                                                                // SoundTap/Totem/Stagefright/Streamium
-            ], [NAME, VERSION], [
-
-            /(smp)((\d+)[\d\.]+)/i                                              // SMP
-            ], [NAME, VERSION], [
-
-            /(vlc) media player - version ((\d+)[\w\.]+)/i,                     // VLC Videolan
-            /(vlc)\/((\d+)[\w\.-]+)/i,
-            /(xbmc|gvfs|xine|xmms|irapp)\/((\d+)[\w\.-]+)/i,                    // XBMC/gvfs/Xine/XMMS/irapp
-            /(foobar2000)\/((\d+)[\d\.]+)/i,                                    // Foobar2000
-            /(itunes)\/((\d+)[\d\.]+)/i                                         // iTunes
-            ], [NAME, VERSION], [
-
-            /(wmplayer)\/((\d+)[\w\.-]+)/i,                                     // Windows Media Player
-            /(windows-media-player)\/((\d+)[\w\.-]+)/i
-            ], [[NAME, /-/g, ' '], VERSION], [
-
-            /windows\/((\d+)[\w\.-]+) upnp\/[\d\.]+ dlnadoc\/[\d\.]+ (home media server)/i
-                                                                                // Windows Media Server
-            ], [VERSION, [NAME, 'Windows']], [
-
-            /(com\.riseupradioalarm)\/((\d+)[\d\.]*)/i                          // RiseUP Radio Alarm
-            ], [NAME, VERSION], [
-
-            /(rad.io)\s((\d+)[\d\.]+)/i,                                        // Rad.io
-            /(radio.(?:de|at|fr))\s((\d+)[\d\.]+)/i
-            ], [[NAME, 'rad.io'], VERSION]
-
-            //////////////////////
-            // Media players END
-            ////////////////////*/
-
         ],
 
         cpu : [[
@@ -3436,7 +3454,7 @@ exports.parse = function(sdp) {
 
         device : [[
 
-            /\((ipad|playbook);[\w\s\);-]+(rim|apple)/i                         // iPad/PlayBook
+            /\((ipad|playbook);[\w\s\),;-]+(rim|apple)/i                        // iPad/PlayBook
             ], [MODEL, VENDOR, [TYPE, TABLET]], [
 
             /applecoremedia\/[\w\.]+ \((ipad)/                                  // iPad
@@ -3474,13 +3492,13 @@ exports.parse = function(sdp) {
             /\(bb10;\s(\w+)/i                                                   // BlackBerry 10
             ], [MODEL, [VENDOR, 'BlackBerry'], [TYPE, MOBILE]], [
                                                                                 // Asus Tablets
-            /android.+(transfo[prime\s]{4,10}\s\w+|eeepc|slider\s\w+|nexus 7|padfone)/i
+            /android.+(transfo[prime\s]{4,10}\s\w+|eeepc|slider\s\w+|nexus 7|padfone|p00c)/i
             ], [MODEL, [VENDOR, 'Asus'], [TYPE, TABLET]], [
 
             /(sony)\s(tablet\s[ps])\sbuild\//i,                                  // Sony
             /(sony)?(?:sgp.+)\sbuild\//i
             ], [[VENDOR, 'Sony'], [MODEL, 'Xperia Tablet'], [TYPE, TABLET]], [
-            /android.+\s([c-g]\d{4}|so[-l]\w+)\sbuild\//i
+            /android.+\s([c-g]\d{4}|so[-l]\w+)(?=\sbuild\/|\).+chrome\/(?![1-6]{0,1}\d\.))/i
             ], [MODEL, [VENDOR, 'Sony'], [TYPE, MOBILE]], [
 
             /\s(ouya)\s/i,                                                      // Ouya
@@ -3496,13 +3514,10 @@ exports.parse = function(sdp) {
             /(sprint\s(\w+))/i                                                  // Sprint Phones
             ], [[VENDOR, mapper.str, maps.device.sprint.vendor], [MODEL, mapper.str, maps.device.sprint.model], [TYPE, MOBILE]], [
 
-            /(lenovo)\s?(S(?:5000|6000)+(?:[-][\w+]))/i                         // Lenovo tablets
-            ], [VENDOR, MODEL, [TYPE, TABLET]], [
-
-            /(htc)[;_\s-]+([\w\s]+(?=\))|\w+)*/i,                               // HTC
+            /(htc)[;_\s-]+([\w\s]+(?=\)|\sbuild)|\w+)/i,                        // HTC
             /(zte)-(\w*)/i,                                                     // ZTE
-            /(alcatel|geeksphone|lenovo|nexian|panasonic|(?=;\s)sony)[_\s-]?([\w-]*)/i
-                                                                                // Alcatel/GeeksPhone/Lenovo/Nexian/Panasonic/Sony
+            /(alcatel|geeksphone|nexian|panasonic|(?=;\s)sony)[_\s-]?([\w-]*)/i
+                                                                                // Alcatel/GeeksPhone/Nexian/Panasonic/Sony
             ], [VENDOR, [MODEL, /_/g, ' '], [TYPE, MOBILE]], [
 
             /(nexus\s9)/i                                                       // HTC Nexus 9
@@ -3555,7 +3570,7 @@ exports.parse = function(sdp) {
             /(nokia)[\s_-]?([\w-]*)/i
             ], [[VENDOR, 'Nokia'], MODEL, [TYPE, MOBILE]], [
 
-            /android\s3\.[\s\w;-]{10}(a\d{3})/i                                 // Acer
+            /android[x\d\.\s;]+\s([ab][1-7]\-?[0178a]\d\d?)/i                   // Acer
             ], [MODEL, [VENDOR, 'Acer'], [TYPE, TABLET]], [
 
             /android.+([vl]k\-?\d{3})\s+build/i                                 // LG Tablet
@@ -3569,8 +3584,12 @@ exports.parse = function(sdp) {
             /android.+lg(\-?[\d\w]+)\s+build/i
             ], [MODEL, [VENDOR, 'LG'], [TYPE, MOBILE]], [
 
+            /(lenovo)\s?(s(?:5000|6000)(?:[\w-]+)|tab(?:[\s\w]+))/i             // Lenovo tablets
+            ], [VENDOR, MODEL, [TYPE, TABLET]], [
             /android.+(ideatab[a-z0-9\-\s]+)/i                                  // Lenovo
             ], [MODEL, [VENDOR, 'Lenovo'], [TYPE, TABLET]], [
+            /(lenovo)[_\s-]?([\w-]+)/i
+            ], [VENDOR, MODEL, [TYPE, MOBILE]], [
 
             /linux;.+((jolla));/i                                               // Jolla
             ], [VENDOR, MODEL, [TYPE, MOBILE]], [
@@ -3590,19 +3609,20 @@ exports.parse = function(sdp) {
             /android.+;\s(pixel c)[\s)]/i                                       // Google Pixel C
             ], [MODEL, [VENDOR, 'Google'], [TYPE, TABLET]], [
 
-            /android.+;\s(pixel( [23])?( xl)?)\s/i                              // Google Pixel
+            /android.+;\s(pixel( [23])?( xl)?)[\s)]/i                              // Google Pixel
             ], [MODEL, [VENDOR, 'Google'], [TYPE, MOBILE]], [
 
             /android.+;\s(\w+)\s+build\/hm\1/i,                                 // Xiaomi Hongmi 'numeric' models
             /android.+(hm[\s\-_]*note?[\s_]*(?:\d\w)?)\s+build/i,               // Xiaomi Hongmi
-            /android.+(mi[\s\-_]*(?:one|one[\s_]plus|note lte)?[\s_]*(?:\d?\w?)[\s_]*(?:plus)?)\s+build/i,    // Xiaomi Mi
+            /android.+(mi[\s\-_]*(?:a\d|one|one[\s_]plus|note lte)?[\s_]*(?:\d?\w?)[\s_]*(?:plus)?)\s+build/i,    
+                                                                                // Xiaomi Mi
             /android.+(redmi[\s\-_]*(?:note)?(?:[\s_]*[\w\s]+))\s+build/i       // Redmi Phones
             ], [[MODEL, /_/g, ' '], [VENDOR, 'Xiaomi'], [TYPE, MOBILE]], [
             /android.+(mi[\s\-_]*(?:pad)(?:[\s_]*[\w\s]+))\s+build/i            // Mi Pad tablets
             ],[[MODEL, /_/g, ' '], [VENDOR, 'Xiaomi'], [TYPE, TABLET]], [
-            /android.+;\s(m[1-5]\snote)\sbuild/i                                // Meizu Tablet
-            ], [MODEL, [VENDOR, 'Meizu'], [TYPE, TABLET]], [
-            /(mz)-([\w-]{2,})/i                                                 // Meizu Phone
+            /android.+;\s(m[1-5]\snote)\sbuild/i                                // Meizu
+            ], [MODEL, [VENDOR, 'Meizu'], [TYPE, MOBILE]], [
+            /(mz)-([\w-]{2,})/i
             ], [[VENDOR, 'Meizu'], MODEL, [TYPE, MOBILE]], [
 
             /android.+a000(1)\s+build/i,                                        // OnePlus
@@ -3680,60 +3700,11 @@ exports.parse = function(sdp) {
             /\s(mobile)(?:[;\/]|\ssafari)/i                                     // Unidentifiable Mobile
             ], [[TYPE, util.lowerize], VENDOR, MODEL], [
 
+            /[\s\/\(](smart-?tv)[;\)]/i                                         // SmartTV
+            ], [[TYPE, SMARTTV]], [
+
             /(android[\w\.\s\-]{0,9});.+build/i                                 // Generic Android Device
             ], [MODEL, [VENDOR, 'Generic']]
-
-
-        /*//////////////////////////
-            // TODO: move to string map
-            ////////////////////////////
-
-            /(C6603)/i                                                          // Sony Xperia Z C6603
-            ], [[MODEL, 'Xperia Z C6603'], [VENDOR, 'Sony'], [TYPE, MOBILE]], [
-            /(C6903)/i                                                          // Sony Xperia Z 1
-            ], [[MODEL, 'Xperia Z 1'], [VENDOR, 'Sony'], [TYPE, MOBILE]], [
-
-            /(SM-G900[F|H])/i                                                   // Samsung Galaxy S5
-            ], [[MODEL, 'Galaxy S5'], [VENDOR, 'Samsung'], [TYPE, MOBILE]], [
-            /(SM-G7102)/i                                                       // Samsung Galaxy Grand 2
-            ], [[MODEL, 'Galaxy Grand 2'], [VENDOR, 'Samsung'], [TYPE, MOBILE]], [
-            /(SM-G530H)/i                                                       // Samsung Galaxy Grand Prime
-            ], [[MODEL, 'Galaxy Grand Prime'], [VENDOR, 'Samsung'], [TYPE, MOBILE]], [
-            /(SM-G313HZ)/i                                                      // Samsung Galaxy V
-            ], [[MODEL, 'Galaxy V'], [VENDOR, 'Samsung'], [TYPE, MOBILE]], [
-            /(SM-T805)/i                                                        // Samsung Galaxy Tab S 10.5
-            ], [[MODEL, 'Galaxy Tab S 10.5'], [VENDOR, 'Samsung'], [TYPE, TABLET]], [
-            /(SM-G800F)/i                                                       // Samsung Galaxy S5 Mini
-            ], [[MODEL, 'Galaxy S5 Mini'], [VENDOR, 'Samsung'], [TYPE, MOBILE]], [
-            /(SM-T311)/i                                                        // Samsung Galaxy Tab 3 8.0
-            ], [[MODEL, 'Galaxy Tab 3 8.0'], [VENDOR, 'Samsung'], [TYPE, TABLET]], [
-
-            /(T3C)/i                                                            // Advan Vandroid T3C
-            ], [MODEL, [VENDOR, 'Advan'], [TYPE, TABLET]], [
-            /(ADVAN T1J\+)/i                                                    // Advan Vandroid T1J+
-            ], [[MODEL, 'Vandroid T1J+'], [VENDOR, 'Advan'], [TYPE, TABLET]], [
-            /(ADVAN S4A)/i                                                      // Advan Vandroid S4A
-            ], [[MODEL, 'Vandroid S4A'], [VENDOR, 'Advan'], [TYPE, MOBILE]], [
-
-            /(V972M)/i                                                          // ZTE V972M
-            ], [MODEL, [VENDOR, 'ZTE'], [TYPE, MOBILE]], [
-
-            /(i-mobile)\s(IQ\s[\d\.]+)/i                                        // i-mobile IQ
-            ], [VENDOR, MODEL, [TYPE, MOBILE]], [
-            /(IQ6.3)/i                                                          // i-mobile IQ IQ 6.3
-            ], [[MODEL, 'IQ 6.3'], [VENDOR, 'i-mobile'], [TYPE, MOBILE]], [
-            /(i-mobile)\s(i-style\s[\d\.]+)/i                                   // i-mobile i-STYLE
-            ], [VENDOR, MODEL, [TYPE, MOBILE]], [
-            /(i-STYLE2.1)/i                                                     // i-mobile i-STYLE 2.1
-            ], [[MODEL, 'i-STYLE 2.1'], [VENDOR, 'i-mobile'], [TYPE, MOBILE]], [
-
-            /(mobiistar touch LAI 512)/i                                        // mobiistar touch LAI 512
-            ], [[MODEL, 'Touch LAI 512'], [VENDOR, 'mobiistar'], [TYPE, MOBILE]], [
-
-            /////////////
-            // END TODO
-            ///////////*/
-
         ],
 
         engine : [[
@@ -3741,8 +3712,12 @@ exports.parse = function(sdp) {
             /windows.+\sedge\/([\w\.]+)/i                                       // EdgeHTML
             ], [VERSION, [NAME, 'EdgeHTML']], [
 
+            /webkit\/537\.36.+chrome\/(?!27)/i                                  // Blink
+            ], [[NAME, 'Blink']], [
+
             /(presto)\/([\w\.]+)/i,                                             // Presto
-            /(webkit|trident|netfront|netsurf|amaya|lynx|w3m)\/([\w\.]+)/i,     // WebKit/Trident/NetFront/NetSurf/Amaya/Lynx/w3m
+            /(webkit|trident|netfront|netsurf|amaya|lynx|w3m|goanna)\/([\w\.]+)/i,     
+                                                                                // WebKit/Trident/NetFront/NetSurf/Amaya/Lynx/w3m/Goanna
             /(khtml|tasman|links)[\/\s]\(?([\w\.]+)/i,                          // KHTML/Tasman/Links
             /(icab)[\/\s]([23]\.[\d\.]+)/i                                      // iCab
             ], [NAME, VERSION], [
@@ -3768,9 +3743,8 @@ exports.parse = function(sdp) {
             ], [[NAME, 'BlackBerry'], VERSION], [
             /(blackberry)\w*\/?([\w\.]*)/i,                                     // Blackberry
             /(tizen)[\/\s]([\w\.]+)/i,                                          // Tizen
-            /(android|webos|palm\sos|qnx|bada|rim\stablet\sos|meego|contiki)[\/\s-]?([\w\.]*)/i,
-                                                                                // Android/WebOS/Palm/QNX/Bada/RIM/MeeGo/Contiki
-            /linux;.+(sailfish);/i                                              // Sailfish OS
+            /(android|webos|palm\sos|qnx|bada|rim\stablet\sos|meego|sailfish|contiki)[\/\s-]?([\w\.]*)/i
+                                                                                // Android/WebOS/Palm/QNX/Bada/RIM/MeeGo/Contiki/Sailfish OS
             ], [NAME, VERSION], [
             /(symbian\s?os|symbos|s60(?=;))[\/\s-]?([\w\.]*)/i                  // Symbian
             ], [[NAME, 'Symbian'], VERSION], [
@@ -3828,22 +3802,6 @@ exports.parse = function(sdp) {
     /////////////////
     // Constructor
     ////////////////
-    /*
-    var Browser = function (name, version) {
-        this[NAME] = name;
-        this[VERSION] = version;
-    };
-    var CPU = function (arch) {
-        this[ARCHITECTURE] = arch;
-    };
-    var Device = function (vendor, model, type) {
-        this[VENDOR] = vendor;
-        this[MODEL] = model;
-        this[TYPE] = type;
-    };
-    var Engine = Browser;
-    var OS = Browser;
-    */
     var UAParser = function (uastring, extensions) {
 
         if (typeof uastring === 'object') {
@@ -3857,11 +3815,6 @@ exports.parse = function(sdp) {
 
         var ua = uastring || ((window && window.navigator && window.navigator.userAgent) ? window.navigator.userAgent : EMPTY);
         var rgxmap = extensions ? util.extend(regexes, extensions) : regexes;
-        //var browser = new Browser();
-        //var cpu = new CPU();
-        //var device = new Device();
-        //var engine = new Engine();
-        //var os = new OS();
 
         this.getBrowser = function () {
             var browser = { name: undefined, version: undefined };
@@ -3904,11 +3857,6 @@ exports.parse = function(sdp) {
         };
         this.setUA = function (uastring) {
             ua = uastring;
-            //browser = new Browser();
-            //cpu = new CPU();
-            //device = new Device();
-            //engine = new Engine();
-            //os = new OS();
             return this;
         };
         return this;
@@ -3942,7 +3890,6 @@ exports.parse = function(sdp) {
         NAME    : NAME,
         VERSION : VERSION
     };
-    //UAParser.Utils = util;
 
     ///////////
     // Export
@@ -3955,39 +3902,10 @@ exports.parse = function(sdp) {
         if (typeof module !== UNDEF_TYPE && module.exports) {
             exports = module.exports = UAParser;
         }
-        // TODO: test!!!!!!!!
-        /*
-        if (require && require.main === module && process) {
-            // cli
-            var jsonize = function (arr) {
-                var res = [];
-                for (var i in arr) {
-                    res.push(new UAParser(arr[i]).getResult());
-                }
-                process.stdout.write(JSON.stringify(res, null, 2) + '\n');
-            };
-            if (process.stdin.isTTY) {
-                // via args
-                jsonize(process.argv.slice(2));
-            } else {
-                // via pipe
-                var str = '';
-                process.stdin.on('readable', function() {
-                    var read = process.stdin.read();
-                    if (read !== null) {
-                        str += read;
-                    }
-                });
-                process.stdin.on('end', function () {
-                    jsonize(str.replace(/\n$/, '').split('\n'));
-                });
-            }
-        }
-        */
         exports.UAParser = UAParser;
     } else {
         // requirejs env (optional)
-        if (typeof(define) === FUNC_TYPE && define.amd) {
+        if (typeof(define) === 'function' && define.amd) {
             define(function () {
                 return UAParser;
             });
@@ -4021,202 +3939,81 @@ exports.parse = function(sdp) {
 })(typeof window === 'object' ? window : this);
 
 },{}],22:[function(require,module,exports){
-(function (global){
-
-var rng;
-
-var crypto = global.crypto || global.msCrypto; // for IE 11
-if (crypto && crypto.getRandomValues) {
-  // WHATWG crypto-based RNG - http://wiki.whatwg.org/wiki/Crypto
-  // Moderately fast, high quality
-  var _rnds8 = new Uint8Array(16);
-  rng = function whatwgRNG() {
-    crypto.getRandomValues(_rnds8);
-    return _rnds8;
-  };
+/**
+ * Convert array of 16 byte values to UUID string format of the form:
+ * XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+ */
+var byteToHex = [];
+for (var i = 0; i < 256; ++i) {
+  byteToHex[i] = (i + 0x100).toString(16).substr(1);
 }
 
-if (!rng) {
+function bytesToUuid(buf, offset) {
+  var i = offset || 0;
+  var bth = byteToHex;
+  // join used to fix memory issue caused by concatenation: https://bugs.chromium.org/p/v8/issues/detail?id=3175#c4
+  return ([bth[buf[i++]], bth[buf[i++]], 
+	bth[buf[i++]], bth[buf[i++]], '-',
+	bth[buf[i++]], bth[buf[i++]], '-',
+	bth[buf[i++]], bth[buf[i++]], '-',
+	bth[buf[i++]], bth[buf[i++]], '-',
+	bth[buf[i++]], bth[buf[i++]],
+	bth[buf[i++]], bth[buf[i++]],
+	bth[buf[i++]], bth[buf[i++]]]).join('');
+}
+
+module.exports = bytesToUuid;
+
+},{}],23:[function(require,module,exports){
+// Unique ID creation requires a high quality random # generator.  In the
+// browser this is a little complicated due to unknown quality of Math.random()
+// and inconsistent support for the `crypto` API.  We do the best we can via
+// feature-detection
+
+// getRandomValues needs to be invoked in a context where "this" is a Crypto
+// implementation. Also, find the complete implementation of crypto on IE11.
+var getRandomValues = (typeof(crypto) != 'undefined' && crypto.getRandomValues && crypto.getRandomValues.bind(crypto)) ||
+                      (typeof(msCrypto) != 'undefined' && typeof window.msCrypto.getRandomValues == 'function' && msCrypto.getRandomValues.bind(msCrypto));
+
+if (getRandomValues) {
+  // WHATWG crypto RNG - http://wiki.whatwg.org/wiki/Crypto
+  var rnds8 = new Uint8Array(16); // eslint-disable-line no-undef
+
+  module.exports = function whatwgRNG() {
+    getRandomValues(rnds8);
+    return rnds8;
+  };
+} else {
   // Math.random()-based (RNG)
   //
   // If all else fails, use Math.random().  It's fast, but is of unspecified
   // quality.
-  var  _rnds = new Array(16);
-  rng = function() {
+  var rnds = new Array(16);
+
+  module.exports = function mathRNG() {
     for (var i = 0, r; i < 16; i++) {
       if ((i & 0x03) === 0) r = Math.random() * 0x100000000;
-      _rnds[i] = r >>> ((i & 0x03) << 3) & 0xff;
+      rnds[i] = r >>> ((i & 0x03) << 3) & 0xff;
     }
 
-    return _rnds;
+    return rnds;
   };
 }
 
-module.exports = rng;
+},{}],24:[function(require,module,exports){
+var rng = require('./lib/rng');
+var bytesToUuid = require('./lib/bytesToUuid');
 
-
-}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],23:[function(require,module,exports){
-//     uuid.js
-//
-//     Copyright (c) 2010-2012 Robert Kieffer
-//     MIT License - http://opensource.org/licenses/mit-license.php
-
-// Unique ID creation requires a high quality random # generator.  We feature
-// detect to determine the best RNG source, normalizing to a function that
-// returns 128-bits of randomness, since that's what's usually required
-var _rng = require('./rng');
-
-// Maps for number <-> hex string conversion
-var _byteToHex = [];
-var _hexToByte = {};
-for (var i = 0; i < 256; i++) {
-  _byteToHex[i] = (i + 0x100).toString(16).substr(1);
-  _hexToByte[_byteToHex[i]] = i;
-}
-
-// **`parse()` - Parse a UUID into it's component bytes**
-function parse(s, buf, offset) {
-  var i = (buf && offset) || 0, ii = 0;
-
-  buf = buf || [];
-  s.toLowerCase().replace(/[0-9a-f]{2}/g, function(oct) {
-    if (ii < 16) { // Don't overflow!
-      buf[i + ii++] = _hexToByte[oct];
-    }
-  });
-
-  // Zero out remaining bytes if string was short
-  while (ii < 16) {
-    buf[i + ii++] = 0;
-  }
-
-  return buf;
-}
-
-// **`unparse()` - Convert UUID byte array (ala parse()) into a string**
-function unparse(buf, offset) {
-  var i = offset || 0, bth = _byteToHex;
-  return  bth[buf[i++]] + bth[buf[i++]] +
-          bth[buf[i++]] + bth[buf[i++]] + '-' +
-          bth[buf[i++]] + bth[buf[i++]] + '-' +
-          bth[buf[i++]] + bth[buf[i++]] + '-' +
-          bth[buf[i++]] + bth[buf[i++]] + '-' +
-          bth[buf[i++]] + bth[buf[i++]] +
-          bth[buf[i++]] + bth[buf[i++]] +
-          bth[buf[i++]] + bth[buf[i++]];
-}
-
-// **`v1()` - Generate time-based UUID**
-//
-// Inspired by https://github.com/LiosK/UUID.js
-// and http://docs.python.org/library/uuid.html
-
-// random #'s we need to init node and clockseq
-var _seedBytes = _rng();
-
-// Per 4.5, create and 48-bit node id, (47 random bits + multicast bit = 1)
-var _nodeId = [
-  _seedBytes[0] | 0x01,
-  _seedBytes[1], _seedBytes[2], _seedBytes[3], _seedBytes[4], _seedBytes[5]
-];
-
-// Per 4.2.2, randomize (14 bit) clockseq
-var _clockseq = (_seedBytes[6] << 8 | _seedBytes[7]) & 0x3fff;
-
-// Previous uuid creation time
-var _lastMSecs = 0, _lastNSecs = 0;
-
-// See https://github.com/broofa/node-uuid for API details
-function v1(options, buf, offset) {
-  var i = buf && offset || 0;
-  var b = buf || [];
-
-  options = options || {};
-
-  var clockseq = options.clockseq !== undefined ? options.clockseq : _clockseq;
-
-  // UUID timestamps are 100 nano-second units since the Gregorian epoch,
-  // (1582-10-15 00:00).  JSNumbers aren't precise enough for this, so
-  // time is handled internally as 'msecs' (integer milliseconds) and 'nsecs'
-  // (100-nanoseconds offset from msecs) since unix epoch, 1970-01-01 00:00.
-  var msecs = options.msecs !== undefined ? options.msecs : new Date().getTime();
-
-  // Per 4.2.1.2, use count of uuid's generated during the current clock
-  // cycle to simulate higher resolution clock
-  var nsecs = options.nsecs !== undefined ? options.nsecs : _lastNSecs + 1;
-
-  // Time since last uuid creation (in msecs)
-  var dt = (msecs - _lastMSecs) + (nsecs - _lastNSecs)/10000;
-
-  // Per 4.2.1.2, Bump clockseq on clock regression
-  if (dt < 0 && options.clockseq === undefined) {
-    clockseq = clockseq + 1 & 0x3fff;
-  }
-
-  // Reset nsecs if clock regresses (new clockseq) or we've moved onto a new
-  // time interval
-  if ((dt < 0 || msecs > _lastMSecs) && options.nsecs === undefined) {
-    nsecs = 0;
-  }
-
-  // Per 4.2.1.2 Throw error if too many uuids are requested
-  if (nsecs >= 10000) {
-    throw new Error('uuid.v1(): Can\'t create more than 10M uuids/sec');
-  }
-
-  _lastMSecs = msecs;
-  _lastNSecs = nsecs;
-  _clockseq = clockseq;
-
-  // Per 4.1.4 - Convert from unix epoch to Gregorian epoch
-  msecs += 12219292800000;
-
-  // `time_low`
-  var tl = ((msecs & 0xfffffff) * 10000 + nsecs) % 0x100000000;
-  b[i++] = tl >>> 24 & 0xff;
-  b[i++] = tl >>> 16 & 0xff;
-  b[i++] = tl >>> 8 & 0xff;
-  b[i++] = tl & 0xff;
-
-  // `time_mid`
-  var tmh = (msecs / 0x100000000 * 10000) & 0xfffffff;
-  b[i++] = tmh >>> 8 & 0xff;
-  b[i++] = tmh & 0xff;
-
-  // `time_high_and_version`
-  b[i++] = tmh >>> 24 & 0xf | 0x10; // include version
-  b[i++] = tmh >>> 16 & 0xff;
-
-  // `clock_seq_hi_and_reserved` (Per 4.2.2 - include variant)
-  b[i++] = clockseq >>> 8 | 0x80;
-
-  // `clock_seq_low`
-  b[i++] = clockseq & 0xff;
-
-  // `node`
-  var node = options.node || _nodeId;
-  for (var n = 0; n < 6; n++) {
-    b[i + n] = node[n];
-  }
-
-  return buf ? buf : unparse(b);
-}
-
-// **`v4()` - Generate random UUID**
-
-// See https://github.com/broofa/node-uuid for API details
 function v4(options, buf, offset) {
-  // Deprecated - 'format' argument, as supported in v1.2
   var i = buf && offset || 0;
 
   if (typeof(options) == 'string') {
-    buf = options == 'binary' ? new Array(16) : null;
+    buf = options === 'binary' ? new Array(16) : null;
     options = null;
   }
   options = options || {};
 
-  var rnds = options.random || (options.rng || _rng)();
+  var rnds = options.random || (options.rng || rng)();
 
   // Per 4.4, set bits for version and `clock_seq_hi_and_reserved`
   rnds[6] = (rnds[6] & 0x0f) | 0x40;
@@ -4224,24 +4021,17 @@ function v4(options, buf, offset) {
 
   // Copy bytes to buffer, if provided
   if (buf) {
-    for (var ii = 0; ii < 16; ii++) {
+    for (var ii = 0; ii < 16; ++ii) {
       buf[i + ii] = rnds[ii];
     }
   }
 
-  return buf || unparse(rnds);
+  return buf || bytesToUuid(rnds);
 }
 
-// Export public API
-var uuid = v4;
-uuid.v1 = v1;
-uuid.v4 = v4;
-uuid.parse = parse;
-uuid.unparse = unparse;
+module.exports = v4;
 
-module.exports = uuid;
-
-},{"./rng":22}],24:[function(require,module,exports){
+},{"./lib/bytesToUuid":22,"./lib/rng":23}],25:[function(require,module,exports){
 /*
 WildEmitter.js is a slim little event emitter by @henrikjoreteg largely based
 on @visionmedia's Emitter from UI Kit.
@@ -4333,9 +4123,11 @@ WildEmitter.mixin = function (constructor) {
 
         // remove specific handler
         i = callbacks.indexOf(fn);
-        callbacks.splice(i, 1);
-        if (callbacks.length === 0) {
-            delete this.callbacks[event];
+        if (i !== -1) {
+            callbacks.splice(i, 1);
+            if (callbacks.length === 0) {
+                delete this.callbacks[event];
+            }
         }
         return this;
     };
