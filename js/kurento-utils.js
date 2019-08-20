@@ -37,8 +37,6 @@ function insertScriptSrcInHtmlDom(scriptSrc) {
 function importScriptsDependsOnBrowser() {
     if (browser.name === 'IE') {
         insertScriptSrcInHtmlDom('https://cdn.temasys.io/adapterjs/0.15.x/adapter.debug.js');
-    } else {
-        insertScriptSrcInHtmlDom('/webjars/webrtc-adapter/release/adapter.js');
     }
 }
 importScriptsDependsOnBrowser();
