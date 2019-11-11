@@ -314,8 +314,8 @@ function WebRtcPeer(mode, options, callback) {
     };
     this.generateOffer = function (callback) {
         callback = callback.bind(this);
-        let useAudio = true;
-        let useVideo = true;
+        var useAudio = true;
+        var useVideo = true;
         if (mediaConstraints) {
             useAudio = typeof mediaConstraints.audio === 'boolean' ? mediaConstraints.audio : true;
             useVideo = typeof mediaConstraints.video === 'boolean' ? mediaConstraints.video : true;
