@@ -3255,7 +3255,7 @@ exports.parse = function(sdp) {
 
 },{"sdp-transform":14}],21:[function(require,module,exports){
 /*!
- * UAParser.js v0.7.20
+ * UAParser.js v0.7.21
  * Lightweight JavaScript-based User-Agent string parser
  * https://github.com/faisalman/ua-parser-js
  *
@@ -3272,7 +3272,7 @@ exports.parse = function(sdp) {
     /////////////
 
 
-    var LIBVERSION  = '0.7.20',
+    var LIBVERSION  = '0.7.21',
         EMPTY       = '',
         UNKNOWN     = '?',
         FUNC_TYPE   = 'function',
@@ -3493,10 +3493,10 @@ exports.parse = function(sdp) {
             /(kindle)\/([\w\.]+)/i,                                             // Kindle
             /(lunascape|maxthon|netfront|jasmine|blazer)[\/\s]?([\w\.]*)/i,
                                                                                 // Lunascape/Maxthon/Netfront/Jasmine/Blazer
-
             // Trident based
-            /(avant\s|iemobile|slim|baidu)(?:browser)?[\/\s]?([\w\.]*)/i,
-                                                                                // Avant/IEMobile/SlimBrowser/Baidu
+            /(avant\s|iemobile|slim)(?:browser)?[\/\s]?([\w\.]*)/i,
+                                                                                // Avant/IEMobile/SlimBrowser
+            /(bidubrowser|baidubrowser)[\/\s]?([\w\.]+)/i,                      // Baidu Browser
             /(?:ms|\()(ie)\s([\w\.]+)/i,                                        // Internet Explorer
 
             // Webkit/KHTML based
@@ -3516,6 +3516,12 @@ exports.parse = function(sdp) {
 
             /(yabrowser)\/([\w\.]+)/i                                           // Yandex
             ], [[NAME, 'Yandex'], VERSION], [
+
+            /(Avast)\/([\w\.]+)/i                                               // Avast Secure Browser
+            ], [[NAME, 'Avast Secure Browser'], VERSION], [
+
+            /(AVG)\/([\w\.]+)/i                                                 // AVG Secure Browser
+            ], [[NAME, 'AVG Secure Browser'], VERSION], [
 
             /(puffin)\/([\w\.]+)/i                                              // Puffin
             ], [[NAME, 'Puffin'], VERSION], [
@@ -3538,7 +3544,7 @@ exports.parse = function(sdp) {
             /(micromessenger)\/([\w\.]+)/i                                      // WeChat
             ], [[NAME, 'WeChat'], VERSION], [
 
-            /(brave)\/([\w\.]+)/i                                              // Brave browser
+            /(brave)\/([\w\.]+)/i                                               // Brave browser
             ], [[NAME, 'Brave'], VERSION], [
 
             /(qqbrowserlite)\/([\w\.]+)/i                                       // QQBrowserLite
@@ -3550,7 +3556,7 @@ exports.parse = function(sdp) {
             /m?(qqbrowser)[\/\s]?([\w\.]+)/i                                    // QQBrowser
             ], [NAME, VERSION], [
 
-            /(BIDUBrowser)[\/\s]?([\w\.]+)/i                                    // Baidu Browser
+            /(baiduboxapp)[\/\s]?([\w\.]+)/i                                    // Baidu App
             ], [NAME, VERSION], [
 
             /(2345Explorer)[\/\s]?([\w\.]+)/i                                   // 2345 Browser
@@ -3559,7 +3565,7 @@ exports.parse = function(sdp) {
             /(MetaSr)[\/\s]?([\w\.]+)/i                                         // SouGouBrowser
             ], [NAME], [
 
-            /(LBBROWSER)/i                                      // LieBao Browser
+            /(LBBROWSER)/i                                                      // LieBao Browser
             ], [NAME], [
 
             /xiaomi\/miuibrowser\/([\w\.]+)/i                                   // MIUI Browser
@@ -3593,6 +3599,9 @@ exports.parse = function(sdp) {
 
             /(dolfin)\/([\w\.]+)/i                                              // Dolphin
             ], [[NAME, 'Dolphin'], VERSION], [
+
+            /(qihu|qhbrowser|qihoobrowser|360browser)/i                         // 360
+            ], [[NAME, '360 Browser']], [
 
             /((?:android.+)crmo|crios)\/([\w\.]+)/i                             // Chrome for Android/iOS
             ], [[NAME, 'Chrome'], VERSION], [
@@ -3674,7 +3683,7 @@ exports.parse = function(sdp) {
             ], [MODEL, [VENDOR, 'Apple'], [TYPE, TABLET]], [
 
             /(apple\s{0,1}tv)/i                                                 // Apple TV
-            ], [[MODEL, 'Apple TV'], [VENDOR, 'Apple']], [
+            ], [[MODEL, 'Apple TV'], [VENDOR, 'Apple'], [TYPE, SMARTTV]], [
 
             /(archos)\s(gamepad2?)/i,                                           // Archos
             /(hp).+(touchpad)/i,                                                // HP TouchPad
@@ -3737,8 +3746,11 @@ exports.parse = function(sdp) {
             ], [MODEL, [VENDOR, 'HTC'], [TYPE, TABLET]], [
 
             /d\/huawei([\w\s-]+)[;\)]/i,
-            /(nexus\s6p)/i                                                      // Huawei
+            /(nexus\s6p|vog-l29|ane-lx1|eml-l29)/i                              // Huawei
             ], [MODEL, [VENDOR, 'Huawei'], [TYPE, MOBILE]], [
+
+            /android.+(bah2?-a?[lw]\d{2})/i                                     // Huawei MediaPad
+            ], [MODEL, [VENDOR, 'Huawei'], [TYPE, TABLET]], [
 
             /(microsoft);\s(lumia[\s\w]+)/i                                     // Microsoft Lumia
             ], [VENDOR, MODEL, [TYPE, MOBILE]], [
@@ -3814,7 +3826,7 @@ exports.parse = function(sdp) {
             ], [VENDOR, MODEL, [TYPE, MOBILE]], [
 
             /crkey/i                                                            // Google Chromecast
-            ], [[MODEL, 'Chromecast'], [VENDOR, 'Google']], [
+            ], [[MODEL, 'Chromecast'], [VENDOR, 'Google'], [TYPE, SMARTTV]], [
 
             /android.+;\s(glass)\s\d/i                                          // Google Glass
             ], [MODEL, [VENDOR, 'Google'], [TYPE, WEARABLE]], [
@@ -3839,7 +3851,7 @@ exports.parse = function(sdp) {
             ], [[VENDOR, 'Meizu'], MODEL, [TYPE, MOBILE]], [
 
             /android.+a000(1)\s+build/i,                                        // OnePlus
-            /android.+oneplus\s(a\d{4})\s+build/i
+            /android.+oneplus\s(a\d{4})[\s)]/i
             ], [MODEL, [VENDOR, 'OnePlus'], [TYPE, MOBILE]], [
 
             /android.+[;\/]\s*(RCT[\d\w]+)\s+build/i                            // RCA Tablets
@@ -3925,8 +3937,8 @@ exports.parse = function(sdp) {
             /windows.+\sedge\/([\w\.]+)/i                                       // EdgeHTML
             ], [VERSION, [NAME, 'EdgeHTML']], [
 
-            /webkit\/537\.36.+chrome\/(?!27)/i                                  // Blink
-            ], [[NAME, 'Blink']], [
+            /webkit\/537\.36.+chrome\/(?!27)([\w\.]+)/i                         // Blink
+            ], [VERSION, [NAME, 'Blink']], [
 
             /(presto)\/([\w\.]+)/i,                                             // Presto
             /(webkit|trident|netfront|netsurf|amaya|lynx|w3m|goanna)\/([\w\.]+)/i,     
@@ -3955,7 +3967,7 @@ exports.parse = function(sdp) {
             /\((bb)(10);/i                                                      // BlackBerry 10
             ], [[NAME, 'BlackBerry'], VERSION], [
             /(blackberry)\w*\/?([\w\.]*)/i,                                     // Blackberry
-            /(tizen)[\/\s]([\w\.]+)/i,                                          // Tizen
+            /(tizen|kaios)[\/\s]([\w\.]+)/i,                                    // Tizen/KaiOS
             /(android|webos|palm\sos|qnx|bada|rim\stablet\sos|meego|sailfish|contiki)[\/\s-]?([\w\.]*)/i
                                                                                 // Android/WebOS/Palm/QNX/Bada/RIM/MeeGo/Contiki/Sailfish OS
             ], [NAME, VERSION], [
@@ -4134,7 +4146,7 @@ exports.parse = function(sdp) {
     //   jQuery always exports to global scope, unless jQuery.noConflict(true) is used,
     //   and we should catch that.
     var $ = window && (window.jQuery || window.Zepto);
-    if (typeof $ !== UNDEF_TYPE && !$.ua) {
+    if ($ && !$.ua) {
         var parser = new UAParser();
         $.ua = parser.getResult();
         $.ua.get = function () {
