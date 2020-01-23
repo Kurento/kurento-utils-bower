@@ -314,23 +314,21 @@ function WebRtcPeer(mode, options, callback) {
     };
     this.generateOffer = function (callback) {
         callback = callback.bind(this);
-        var useAudio = true;
-        var useVideo = true;
-        if (mediaConstraints) {
-            useAudio = typeof mediaConstraints.audio === 'boolean' ? mediaConstraints.audio : true;
-            useVideo = typeof mediaConstraints.video === 'boolean' ? mediaConstraints.video : true;
-        }
-        if (useAudio) {
-            pc.addTransceiver('audio', { direction: mode });
-        }
-        if (useVideo) {
-            pc.addTransceiver('video', { direction: mode });
+        if (mode === 'recvonly') {
+            var useAudio = mediaConstraints && typeof mediaConstraints.audio === 'boolean' ? mediaConstraints.audio : true;
+            var useVideo = mediaConstraints && typeof mediaConstraints.video === 'boolean' ? mediaConstraints.video : true;
+            if (useAudio) {
+                pc.addTransceiver('audio', { direction: 'recvonly' });
+            }
+            if (useVideo) {
+                pc.addTransceiver('video', { direction: 'recvonly' });
+            }
         }
         if (typeof AdapterJS !== 'undefined' && AdapterJS.webrtcDetectedBrowser === 'IE' && AdapterJS.webrtcDetectedVersion >= 9) {
             var setLocalDescriptionOnSuccess = function () {
                 sleep(1000);
                 var localDescription = pc.localDescription;
-                logger.debug('Local description set', localDescription.sdp);
+                logger.debug('Local description set\n', localDescription.sdp);
                 if (multistream && usePlanB) {
                     localDescription = interop.toUnifiedPlan(localDescription);
                     logger.debug('offer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
@@ -339,7 +337,7 @@ function WebRtcPeer(mode, options, callback) {
             };
             var createOfferOnSuccess = function (offer) {
                 logger.debug('Created SDP offer');
-                logger.debug('Local description set', pc.localDescription);
+                logger.debug('Local description set\n', pc.localDescription);
                 pc.setLocalDescription(offer, setLocalDescriptionOnSuccess, callback);
             };
             pc.createOffer(createOfferOnSuccess, callback);
@@ -350,7 +348,7 @@ function WebRtcPeer(mode, options, callback) {
                 return pc.setLocalDescription(offer);
             }).then(function () {
                 var localDescription = pc.localDescription;
-                logger.debug('Local description set', localDescription.sdp);
+                logger.debug('Local description set\n', localDescription.sdp);
                 if (multistream && usePlanB) {
                     localDescription = interop.toUnifiedPlan(localDescription);
                     logger.debug('offer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
@@ -441,7 +439,7 @@ function WebRtcPeer(mode, options, callback) {
                 localDescription = interop.toUnifiedPlan(localDescription);
                 logger.debug('answer::origPlanB->UnifiedPlan', dumpSDP(localDescription));
             }
-            logger.debug('Local description set', localDescription.sdp);
+            logger.debug('Local description set\n', localDescription.sdp);
             callback(null, localDescription.sdp);
         }).catch(callback);
     };
@@ -4177,14 +4175,16 @@ function bytesToUuid(buf, offset) {
   var i = offset || 0;
   var bth = byteToHex;
   // join used to fix memory issue caused by concatenation: https://bugs.chromium.org/p/v8/issues/detail?id=3175#c4
-  return ([bth[buf[i++]], bth[buf[i++]], 
-	bth[buf[i++]], bth[buf[i++]], '-',
-	bth[buf[i++]], bth[buf[i++]], '-',
-	bth[buf[i++]], bth[buf[i++]], '-',
-	bth[buf[i++]], bth[buf[i++]], '-',
-	bth[buf[i++]], bth[buf[i++]],
-	bth[buf[i++]], bth[buf[i++]],
-	bth[buf[i++]], bth[buf[i++]]]).join('');
+  return ([
+    bth[buf[i++]], bth[buf[i++]],
+    bth[buf[i++]], bth[buf[i++]], '-',
+    bth[buf[i++]], bth[buf[i++]], '-',
+    bth[buf[i++]], bth[buf[i++]], '-',
+    bth[buf[i++]], bth[buf[i++]], '-',
+    bth[buf[i++]], bth[buf[i++]],
+    bth[buf[i++]], bth[buf[i++]],
+    bth[buf[i++]], bth[buf[i++]]
+  ]).join('');
 }
 
 module.exports = bytesToUuid;
