@@ -322,6 +322,10 @@ function WebRtcPeer(mode, options, callback) {
             if (useVideo) {
                 pc.addTransceiver('video', { direction: 'recvonly' });
             }
+        } else if (mode === 'sendonly') {
+            pc.getTransceivers().forEach(function (transceiver) {
+                transceiver.direction = 'sendonly';
+            });
         }
         if (typeof AdapterJS !== 'undefined' && AdapterJS.webrtcDetectedBrowser === 'IE' && AdapterJS.webrtcDetectedVersion >= 9) {
             var setLocalDescriptionOnSuccess = function () {
@@ -472,10 +476,6 @@ function WebRtcPeer(mode, options, callback) {
             audioStream.getTracks().forEach(function (track) {
                 pc.addTrack(track, audioStream);
             });
-        }
-        var browser = parser.getBrowser();
-        if (mode === 'sendonly' && (browser.name === 'Chrome' || browser.name === 'Chromium') && browser.major === 39) {
-            mode = 'sendrecv';
         }
         callback();
     }
